@@ -1,0 +1,144 @@
+diff --git a/scripts/benchmark.py b/scripts/benchmark.py
+index bad2140..0b2dbb0 100644
+--- a/scripts/benchmark.py
++++ b/scripts/benchmark.py
+@@ -36,6 +36,7 @@ from lib_agent import (
+     ModelValidationError,
+     slugify_model,
+     validate_model,
++    wait_for_agent_workspace,
+     VALID_THINKING_LEVELS,
+ )
+ from lib_axiom import init_axiom
+@@ -199,6 +200,16 @@ def _parse_args() -> argparse.Namespace:
+             "local, vllm, or sglang"
+         ),
+     )
++    parser.add_argument(
++        "--prepare-agent-only",
++        action="store_true",
++        help="Create or rewrite the benchmark agent, wait until it resolves, then exit",
++    )
++    parser.add_argument(
++        "--require-prepared-agent",
++        action="store_true",
++        help="Fail instead of creating or rewriting the benchmark agent during task execution",
++    )
+     parser.add_argument(
+         "--suite",
+         default="all",
+@@ -368,6 +379,13 @@ def _next_run_id(run_root: Path) -> str:
+     return f"{next_id:04d}"
+ 
+ 
++def _benchmark_agent_workspace(run_root: Path, model_slug: str) -> Path:
++    override = os.environ.get("PINCHBENCH_AGENT_WORKSPACE")
++    if override:
++        return Path(override).expanduser()
++    return run_root / "agents" / model_slug / "agent_workspace"
++
++
+ def _load_ascii_art(script_dir: Path, filename: str) -> str | None:
+     """Load ASCII art from a local file if available."""
+     art_path = script_dir / filename
+@@ -807,8 +825,9 @@ def main():
+     run_id = _next_run_id(run_root)
+     skill_dir = skill_root
+     agent_id = f"bench-{model_slug}"
+-    # Use a shared workspace for the agent - we'll copy fixtures per task
+-    agent_workspace = Path(f"/tmp/pinchbench/{run_id}/agent_workspace")
++    # Keep the benchmark agent workspace stable across rounds; task fixtures are
++    # still reset per task inside prepare_task_workspace().
++    agent_workspace = _benchmark_agent_workspace(run_root, model_slug)
+ 
+     # Validate model exists before wasting time on tasks
+     os.environ["PINCHBENCH_MODEL_PROVIDER"] = args.model_provider
+@@ -821,13 +840,43 @@ def main():
+             logger.error("❌ %s", exc)
+             sys.exit(1)
+ 
+-    ensure_agent_exists(
+-        agent_id,
+-        args.model,
+-        agent_workspace,
+-        base_url=args.base_url,
+-        api_key=args.api_key,
+-    )
++    if args.prepare_agent_only:
++        os.environ["PINCHBENCH_REQUIRE_AGENT_WORKSPACE"] = "1"
++        ensure_agent_exists(
++            agent_id,
++            args.model,
++            agent_workspace,
++            base_url=args.base_url,
++            api_key=args.api_key,
++        )
++        if not wait_for_agent_workspace(agent_id, agent_workspace):
++            logger.error(
++                "❌ Prepared agent %s is not ready at workspace %s",
++                agent_id,
++                agent_workspace,
++            )
++            sys.exit(1)
++        cleanup_agent_sessions(agent_id)
++        logger.info("✅ Prepared benchmark agent %s at %s", agent_id, agent_workspace)
++        return
++
++    if args.require_prepared_agent:
++        os.environ["PINCHBENCH_REQUIRE_AGENT_WORKSPACE"] = "1"
++        if not wait_for_agent_workspace(agent_id, agent_workspace, timeout_seconds=5.0):
++            logger.error(
++                "❌ Prepared agent %s is missing or points to the wrong workspace (%s)",
++                agent_id,
++                agent_workspace,
++            )
++            sys.exit(1)
++    else:
++        ensure_agent_exists(
++            agent_id,
++            args.model,
++            agent_workspace,
++            base_url=args.base_url,
++            api_key=args.api_key,
++        )
+     cleanup_agent_sessions(agent_id)
+ 
+     task_ids = _select_task_ids(runner.tasks, args.suite, runner.task_loader.category_map)
+diff --git a/scripts/lib_agent.py b/scripts/lib_agent.py
+index 841f7b7..80fad81 100644
+--- a/scripts/lib_agent.py
++++ b/scripts/lib_agent.py
+@@ -314,6 +314,23 @@ def _get_agent_workspace(agent_id: str) -> Path | None:
+         return None
+ 
+ 
++def wait_for_agent_workspace(
++    agent_id: str,
++    workspace_dir: Path,
++    *,
++    timeout_seconds: float = 30.0,
++    poll_interval_seconds: float = 1.0,
++) -> bool:
++    target_workspace = workspace_dir.resolve()
++    deadline = time.time() + timeout_seconds
++    while time.time() <= deadline:
++        current_workspace = _get_agent_workspace(agent_id)
++        if current_workspace is not None and current_workspace.resolve() == target_workspace:
++            return True
++        time.sleep(poll_interval_seconds)
++    return False
++
++
+ def ensure_agent_exists(
+     agent_id: str,
+     model_id: str,
+@@ -527,6 +544,9 @@ def prepare_task_workspace(skill_dir: Path, run_id: str, task: Task, agent_id: s
+     # Get agent's workspace from agent config
+     workspace = _get_agent_workspace(agent_id)
+     if workspace is None:
++        require_agent_workspace = os.environ.get("PINCHBENCH_REQUIRE_AGENT_WORKSPACE", "")
++        if require_agent_workspace.strip().lower() in {"1", "true", "yes", "on"}:
++            raise RuntimeError(f"Agent workspace unavailable for {agent_id}")
+         # Fallback to task-specific workspace if agent workspace not found
+         logger.warning("Could not find agent workspace, using fallback")
+         workspace = Path(f"/tmp/pinchbench/{run_id}/{task.task_id}")

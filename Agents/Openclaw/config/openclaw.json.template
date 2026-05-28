@@ -1,0 +1,44 @@
+{
+  "meta": { "lastTouchedVersion": "2026.3.8" },
+  "models": {
+    "mode": "merge",
+    "providers": {
+      "default": {
+        "baseUrl": "{{BASE_URL}}",
+        "apiKey": "{{API_KEY}}",
+        "api": "openai-completions",
+        "request": { "allowPrivateNetwork": true },
+        "models": [
+          {
+            "id": "{{MODEL_ID}}",
+            "name": "{{MODEL_ID}}",
+            "api": "openai-completions",
+            "reasoning": false,
+            "input": ["text"],
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+            "contextWindow": 200000,
+            "maxTokens": 65536
+          }
+        ]
+      }
+    }
+  },
+  "agents": {
+    "defaults": {
+      "compaction": { "mode": "safeguard" },
+      "heartbeat": { "every": "{{HEARTBEAT_EVERY}}" },
+      "workspace": "{{WORKSPACE_DIR}}",
+      "sandbox": { "mode": "{{SANDBOX_MODE}}", "scope": "session" }
+    },
+    "list": [{ "id": "main" }]
+  },
+  "commands": { "native": "auto", "nativeSkills": "auto", "restart": true, "ownerDisplay": "raw" },
+  "gateway": {
+    "mode": "local"
+  },
+  "tools": {
+    "exec": { "security": "{{EXEC_SECURITY}}", "ask": "{{EXEC_ASK}}" },
+    "fs": { "workspaceOnly": true }
+  },
+  "plugins": { "allow": ["openai"] }
+}

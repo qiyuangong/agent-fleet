@@ -1,0 +1,29 @@
+{
+  "sessions": [
+    {
+      "id": "sess-old",
+      "status": "active",
+      "updatedAt": "2026-04-22T10:00:00Z",
+      "turnCount": 2,
+      "target": "+19990000001",
+      "latestTurnsSummary": "Earlier turn summary"
+    },
+    {
+      "id": "sess-active-newest",
+      "status": "active",
+      "updatedAt": "2026-04-22T10:05:00Z",
+      "turnCount": 4,
+      "target": "+19990000002",
+      "latestTurnsSummary": "Latest turn summary from newest active multi-turn session"
+    },
+    {
+      "id": "sess-single-turn",
+      "status": "active",
+      "updatedAt": "2026-04-22T10:10:00Z",
+      "turnCount": 1,
+      "target": "+19990000003",
+      "latestTurnsSummary": "Single turn session should be ignored"
+    }
+  ]
+}
+

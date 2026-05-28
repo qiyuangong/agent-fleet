@@ -1,0 +1,20 @@
+{
+  "sessions": [
+    {
+      "id": "sess-completed",
+      "status": "completed",
+      "updatedAt": "2026-04-22T09:00:00Z",
+      "turnCount": 5,
+      "target": "+19990000009",
+      "latestTurnsSummary": "Completed session should not be shown as active"
+    },
+    {
+      "id": "sess-one-turn",
+      "status": "active",
+      "updatedAt": "2026-04-22T09:10:00Z",
+      "turnCount": 1,
+      "target": "+19990000010",
+      "latestTurnsSummary": "Only one turn"
+    }
+  ]
+}

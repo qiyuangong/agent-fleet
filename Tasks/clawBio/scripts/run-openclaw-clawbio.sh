@@ -1,0 +1,174 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Unified launcher for ClawBio benchmark runs.
+# Responsibilities:
+# 1) prepare cache and fleet config paths
+# 2) setup and start OpenClaw fleet
+# 3) run benchmark iterations via run-benchmark.py
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+BENCH_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+REPO_ROOT="$(cd "$BENCH_DIR/../.." && pwd)"
+OPENCLAW_DIR="$REPO_ROOT/Agents/Openclaw"
+
+TIMESTAMP="${TIMESTAMP:-$(date +%Y%m%d-%H%M%S)}"
+COUNT="${COUNT:-}"
+ITERATIONS="${ITERATIONS:-1}"
+RUN_ROOT="${RUN_ROOT:-$BENCH_DIR/runs/$TIMESTAMP}"
+TASK_CONFIG="${TASK_CONFIG:-$BENCH_DIR/config/tasks.json}"
+
+# Keep model/provider config sourced from fleet env or caller env.
+BASE_URL="${BASE_URL:-}"
+API_KEY="${API_KEY:-}"
+MODEL_ID="${MODEL_ID:-}"
+
+OPENCLAW_UID="${OPENCLAW_UID:-$(id -u)}"
+OPENCLAW_GID="${OPENCLAW_GID:-$(id -g)}"
+OPENCLAW_CONTAINER_USER="${OPENCLAW_CONTAINER_USER:-$OPENCLAW_UID}"
+
+OPIK_PLUGIN="${OPIK_PLUGIN:-enabled}"
+OPIK_URL="${OPIK_URL:-}"
+OPIK_WORKSPACE="${OPIK_WORKSPACE:-default}"
+OPIK_API_KEY="${OPIK_API_KEY:-}"
+project_inst_tag="${COUNT:-auto}"
+OPIK_PROJECT_NAME="${OPIK_PROJECT_NAME:-openclaw-clawbio-${TIMESTAMP}-inst${project_inst_tag}-iter${ITERATIONS}}"
+
+OPENCLAW_IMAGE_POLICY="${OPENCLAW_IMAGE_POLICY:-if-missing}"
+CONFIG_BASE="${CONFIG_BASE:-$RUN_ROOT/fleet/openclaw-config}"
+WORKSPACE_BASE="${WORKSPACE_BASE:-$RUN_ROOT/fleet/openclaw-workspaces}"
+PLUGIN_CACHE_DIR="${PLUGIN_CACHE_DIR:-$BENCH_DIR/cache}"
+
+usage() {
+  cat <<EOF
+Usage: $(basename "$0")
+
+One-command launcher for ClawBio benchmark:
+1) optionally build/reuse OpenClaw image
+2) setup OpenClaw fleet with OPIK enabled
+3) patch clawbio plugin config
+4) start fleet containers
+5) run benchmark via run-benchmark.py (native -n iterations)
+
+Optional env vars:
+  COUNT, ITERATIONS, TASK_CONFIG, RUN_ROOT
+  OPIK_URL, OPIK_WORKSPACE, OPIK_API_KEY, OPIK_PROJECT_NAME
+  OPENCLAW_IMAGE_POLICY=if-missing|always
+  CONFIG_BASE, WORKSPACE_BASE, PLUGIN_CACHE_DIR
+
+Provider/fleet vars are read from environment or Agents/Openclaw/config/fleet.env:
+  BASE_URL, API_KEY, MODEL_ID
+EOF
+}
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+  usage
+  exit 0
+fi
+
+# Load fleet defaults early so launcher-side validation can see values
+# configured in Agents/Openclaw/config/fleet.env.
+fleet_env="$OPENCLAW_DIR/config/fleet.env"
+if [[ -f "$fleet_env" ]]; then
+  set -a
+  # shellcheck source=/dev/null
+  . "$fleet_env"
+  set +a
+fi
+
+if [[ "$OPIK_PLUGIN" == "enabled" ]]; then
+  if [[ -z "$OPIK_URL" ]]; then
+    echo "Error: OPIK_PLUGIN=enabled requires OPIK_URL." >&2
+    exit 1
+  fi
+fi
+
+image_exists() {
+  docker image inspect "$1" >/dev/null 2>&1
+}
+
+mkdir -p "$RUN_ROOT" "$CONFIG_BASE" "$WORKSPACE_BASE"
+
+echo "== OpenClaw ClawBio launcher =="
+echo "timestamp:      $TIMESTAMP"
+echo "instances:      ${COUNT:-<from fleet env/setup default>}"
+echo "iterations:     $ITERATIONS"
+echo "run root:       $RUN_ROOT"
+echo "task config:    $TASK_CONFIG"
+echo "image policy:   $OPENCLAW_IMAGE_POLICY"
+echo "opik project:   $OPIK_PROJECT_NAME"
+echo "opik url:       $OPIK_URL"
+echo
+
+cd "$REPO_ROOT"
+
+need_build=0
+if [[ "$OPENCLAW_IMAGE_POLICY" == "always" ]]; then
+  need_build=1
+elif ! image_exists "openclaw:local"; then
+  need_build=1
+elif [[ "$OPIK_PLUGIN" == "enabled" ]] && ! image_exists "openclaw:local-opik"; then
+  need_build=1
+fi
+
+if [[ "$need_build" -eq 1 ]]; then
+  OPIK_PLUGIN="$OPIK_PLUGIN" "$OPENCLAW_DIR/scripts/build-openclaw-image.sh"
+else
+  echo "Reusing local images: openclaw:local and openclaw:local-opik"
+fi
+
+"$BENCH_DIR/scripts/prewarm-cache.sh" --cache-dir "$PLUGIN_CACHE_DIR"
+
+env_args=(
+  "OPIK_PLUGIN=$OPIK_PLUGIN"
+  "OPIK_URL=$OPIK_URL"
+  "OPIK_WORKSPACE=$OPIK_WORKSPACE"
+  "OPIK_API_KEY=$OPIK_API_KEY"
+  "OPIK_PROJECT_NAME=$OPIK_PROJECT_NAME"
+  "OPENCLAW_UID=$OPENCLAW_UID"
+  "OPENCLAW_GID=$OPENCLAW_GID"
+  "OPENCLAW_CONTAINER_USER=$OPENCLAW_CONTAINER_USER"
+  "CONFIG_BASE=$CONFIG_BASE"
+  "WORKSPACE_BASE=$WORKSPACE_BASE"
+  "PLUGIN_CACHE_DIR=$PLUGIN_CACHE_DIR"
+)
+
+if [[ -n "$BASE_URL" ]]; then env_args+=("BASE_URL=$BASE_URL"); fi
+if [[ -n "$API_KEY" ]]; then env_args+=("API_KEY=$API_KEY"); fi
+if [[ -n "$MODEL_ID" ]]; then env_args+=("MODEL_ID=$MODEL_ID"); fi
+if [[ -n "$COUNT" ]]; then env_args+=("COUNT=$COUNT"); fi
+if [[ -n "${SANDBOX_MODE:-}" ]]; then env_args+=("SANDBOX_MODE=$SANDBOX_MODE"); fi
+if [[ -n "${EXEC_SECURITY:-}" ]]; then env_args+=("EXEC_SECURITY=$EXEC_SECURITY"); fi
+if [[ -n "${EXEC_ASK:-}" ]]; then env_args+=("EXEC_ASK=$EXEC_ASK"); fi
+if [[ -n "${WORKSPACE_ONLY:-}" ]]; then env_args+=("WORKSPACE_ONLY=$WORKSPACE_ONLY"); fi
+if [[ -n "${DOCKER_COMPOSE_READ_ONLY:-}" ]]; then env_args+=("DOCKER_COMPOSE_READ_ONLY=$DOCKER_COMPOSE_READ_ONLY"); fi
+
+if [[ -n "$COUNT" ]]; then
+  env "${env_args[@]}" "$OPENCLAW_DIR/scripts/setup.sh" "$COUNT"
+else
+  env "${env_args[@]}" "$OPENCLAW_DIR/scripts/setup.sh"
+fi
+"$BENCH_DIR/scripts/patch-plugin-config.sh" --config-base "$CONFIG_BASE"
+docker compose -f "$OPENCLAW_DIR/docker-compose.yml" down
+docker compose -f "$OPENCLAW_DIR/docker-compose.yml" up -d
+"$OPENCLAW_DIR/scripts/openclaw-fleet.sh" status
+
+run_cmd=("$BENCH_DIR/scripts/run-benchmark.py" --config "$TASK_CONFIG" --output-dir "$(dirname "$RUN_ROOT")" -n "$ITERATIONS" --run-id "$(basename "$RUN_ROOT")")
+if [[ -n "$COUNT" ]]; then
+  run_cmd+=(--instances "$COUNT")
+fi
+"${run_cmd[@]}"
+
+# Create 'latest' symlink so the most recent run is easy to find.
+RUNS_DIR="$(dirname "$RUN_ROOT")"
+RUN_NAME="$(basename "$RUN_ROOT")"
+LATEST_LINK="$RUNS_DIR/latest"
+if [[ -e "$LATEST_LINK" || -L "$LATEST_LINK" ]]; then
+  rm -f "$LATEST_LINK"
+fi
+ln -s "$RUN_NAME" "$LATEST_LINK"
+
+echo
+echo "Run complete."
+echo "Opik project: $OPIK_PROJECT_NAME"
+echo "Run root:      $RUN_ROOT"
+echo "Latest link:   $LATEST_LINK -> $RUN_NAME"

@@ -1,0 +1,180 @@
+diff --git a/scripts/benchmark.py b/scripts/benchmark.py
+index ee392b6..bad2140 100644
+--- a/scripts/benchmark.py
++++ b/scripts/benchmark.py
+@@ -35,7 +35,7 @@ from lib_agent import (
+     execute_openclaw_task,
+     ModelValidationError,
+     slugify_model,
+-    validate_openrouter_model,
++    validate_model,
+     VALID_THINKING_LEVELS,
+ )
+ from lib_axiom import init_axiom
+@@ -191,6 +191,14 @@ def _parse_args() -> argparse.Namespace:
+         required=False,
+         help="Model identifier (e.g., anthropic/claude-sonnet-4)",
+     )
++    parser.add_argument(
++        "--model-provider",
++        default=os.environ.get("PINCHBENCH_MODEL_PROVIDER", "auto"),
++        help=(
++            "Model provider override: auto, openrouter, openai-compatible, "
++            "local, vllm, or sglang"
++        ),
++    )
+     parser.add_argument(
+         "--suite",
+         default="all",
+@@ -803,11 +811,12 @@ def main():
+     agent_workspace = Path(f"/tmp/pinchbench/{run_id}/agent_workspace")
+ 
+     # Validate model exists before wasting time on tasks
++    os.environ["PINCHBENCH_MODEL_PROVIDER"] = args.model_provider
+     if args.base_url:
+         logger.info("Using custom endpoint: %s (skipping OpenRouter validation)", args.base_url)
+     else:
+         try:
+-            validate_openrouter_model(args.model)
++            validate_model(args.model)
+         except ModelValidationError as exc:
+             logger.error("❌ %s", exc)
+             sys.exit(1)
+diff --git a/scripts/lib_agent.py b/scripts/lib_agent.py
+index 6207029..841f7b7 100644
+--- a/scripts/lib_agent.py
++++ b/scripts/lib_agent.py
+@@ -14,6 +14,7 @@ import time
+ from pathlib import Path
+ from typing import Any, Dict, List, Optional
+ from urllib import error, request
++from urllib.parse import urlparse
+ 
+ from lib_tasks import Task
+ from lib_fws import is_fws_task, fws_available, start_fws, stop_fws
+@@ -49,6 +50,98 @@ def slugify_model(model_id: str) -> str:
+     return model_id.replace("/", "-").replace(".", "-").lower()
+ 
+ 
++def _normalize_model_provider(provider: str | None) -> str:
++    if not provider:
++        return "auto"
++    normalized = provider.strip().lower()
++    aliases = {
++        "auto": "auto",
++        "openrouter": "openrouter",
++        "local": "openai-compatible",
++        "openai": "openai-compatible",
++        "openai-compatible": "openai-compatible",
++        "vllm": "openai-compatible",
++        "sglang": "openai-compatible",
++    }
++    return aliases.get(normalized, normalized)
++
++
++def _openclaw_config_candidates() -> List[Path]:
++    candidates: List[Path] = []
++
++    config_path = os.environ.get("OPENCLAW_CONFIG_PATH")
++    if config_path:
++        candidates.append(Path(config_path).expanduser())
++
++    candidates.extend(
++        [
++            Path.home() / ".openclaw" / "openclaw.json",
++            Path.home() / "openclaw-instances" / "1" / "openclaw.json",
++        ]
++    )
++
++    deduped: List[Path] = []
++    seen = set()
++    for path in candidates:
++        key = str(path)
++        if key not in seen:
++            seen.add(key)
++            deduped.append(path)
++    return deduped
++
++
++def _load_default_provider_config() -> Dict[str, Any] | None:
++    for config_path in _openclaw_config_candidates():
++        if not config_path.exists():
++            continue
++        try:
++            payload = json.loads(config_path.read_text(encoding="utf-8"))
++        except (OSError, json.JSONDecodeError) as exc:
++            logger.warning("Failed to read OpenClaw config %s: %s", config_path, exc)
++            continue
++
++        provider = (
++            payload.get("models", {})
++            .get("providers", {})
++            .get("default", {})
++        )
++        if isinstance(provider, dict) and provider:
++            return provider
++    return None
++
++
++def detect_model_provider(model_id: str) -> str:
++    """
++    Detect the model provider backing the current OpenClaw config.
++
++    Returns one of:
++      - "openrouter"
++      - "openai-compatible"
++      - "unknown"
++    """
++    configured = _normalize_model_provider(os.environ.get("PINCHBENCH_MODEL_PROVIDER"))
++    if configured != "auto":
++        return configured
++
++    provider = _load_default_provider_config()
++    if not provider:
++        if "/" not in model_id:
++            return "unknown"
++        return "openrouter"
++
++    base_url = str(provider.get("baseUrl", "") or "").strip()
++    if not base_url:
++        return "unknown"
++
++    parsed = urlparse(base_url)
++    hostname = (parsed.hostname or "").lower()
++    if "openrouter.ai" in hostname:
++        return "openrouter"
++    if parsed.scheme in {"http", "https"}:
++        return "openai-compatible"
++    return "unknown"
++
++
+ def validate_openrouter_model(model_id: str, timeout_seconds: float = 10.0) -> bool:
+     """
+     Validate that a model ID exists on OpenRouter.
+@@ -164,6 +257,26 @@ def validate_openrouter_model(model_id: str, timeout_seconds: float = 10.0) -> b
+     raise ModelValidationError(error_msg)
+ 
+ 
++def validate_model(model_id: str, timeout_seconds: float = 10.0) -> bool:
++    """
++    Validate a model ID when the active provider supports remote catalog checks.
++
++    For locally hosted OpenAI-compatible providers such as vLLM and SGLang,
++    PinchBench cannot verify the model against a central catalog, so validation
++    is skipped and OpenClaw is allowed to handle the real request path.
++    """
++    provider = detect_model_provider(model_id)
++    if provider == "openrouter":
++        return validate_openrouter_model(model_id, timeout_seconds=timeout_seconds)
++
++    logger.info(
++        "Skipping remote model validation for provider '%s': %s",
++        provider,
++        model_id,
++    )
++    return True
++
++
+ def _get_agent_workspace(agent_id: str) -> Path | None:
+     """Get the workspace path for an agent from OpenClaw config."""
+     try:

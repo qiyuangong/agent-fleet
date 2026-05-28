@@ -1,0 +1,166 @@
+{
+  "defaults": {
+    "timeout_seconds": 1800,
+    "thinking": "medium",
+    "artifact_paths": [
+      "outputs"
+    ]
+  },
+  "tasks": [
+    {
+      "id": "pharmgx-reporter-demo",
+      "skill": "pharmgx-reporter",
+      "prompt": "Run a PGx report with sample 23andMe data and save the results to the outputs folder."
+    },
+    {
+      "id": "rnaseq-de-demo",
+      "skill": "rnaseq-de",
+      "prompt": "Do differential expression on sample RNA-seq counts and save the results to the outputs folder."
+    },
+    {
+      "id": "fine-mapping-demo",
+      "skill": "fine-mapping",
+      "prompt": "Run SuSiE fine-mapping on sample GWAS summary stats and save the results to the outputs folder."
+    },
+    {
+      "id": "genome-compare-demo",
+      "skill": "genome-compare",
+      "prompt": "Compare sample genome with George Church PGP-1 and save the comparison report to the outputs folder."
+    },
+    {
+      "id": "methylation-clock-demo",
+      "skill": "methylation-clock",
+      "prompt": "Calculate epigenetic age from sample methylation data and save the results to the outputs folder."
+    },
+    {
+      "id": "protocols-io-demo",
+      "skill": "protocols-io",
+      "prompt": "Find protocols for RNA extraction and Western blot and save the protocol details to the outputs folder."
+    },
+    {
+      "id": "archaic-introgression-demo",
+      "skill": "archaic-introgression",
+      "prompt": "I'd like to detect archaic introgression segments in a modern human genome using the demo data. Run the analysis and write the results to the outputs folder."
+    },
+    {
+      "id": "cell-detection-demo",
+      "skill": "cell-detection",
+      "prompt": "Detect and count cells in the sample fluorescence microscopy image, then save the detection results and annotated image to the outputs folder."
+    },
+    {
+      "id": "claw-metagenomics-demo",
+      "skill": "claw-metagenomics",
+      "prompt": "Run shotgun metagenomics profiling on the sample data to identify microbial taxa and antimicrobial resistance genes. Save the taxonomy report and abundance tables to the outputs folder."
+    },
+    {
+      "id": "data-extractor-demo",
+      "skill": "data-extractor",
+      "prompt": "Extract numerical data from the sample scientific figure image and save the extracted values and visualization to the outputs folder."
+    },
+    {
+      "id": "diff-visualizer-demo",
+      "skill": "diff-visualizer",
+      "prompt": "Create rich visualizations from differential expression results using the sample data — volcano plots, heatmaps, MA plots. Save everything to the outputs folder."
+    },
+    {
+      "id": "drug-photo-demo",
+      "skill": "drug-photo",
+      "prompt": "I have a photo of my medication and my 23andMe genetic data. Generate a personalised pharmacogenomic dosage card from the demo data and save it to the outputs folder."
+    },
+    {
+      "id": "equity-scorer-demo",
+      "skill": "equity-scorer",
+      "prompt": "Compute HEIM diversity and equity metrics from the sample genomic data and save the full equity report to the outputs folder."
+    },
+    {
+      "id": "genome-match-demo",
+      "skill": "genome-match",
+      "prompt": "Score genetic compatibility between male and female genomes across HLA, blood type, and ancestry markers using the bundled genome data. Save the compatibility report to the outputs folder."
+    },
+    {
+      "id": "hla-typing-demo",
+      "skill": "hla-typing",
+      "prompt": "Perform HLA typing from the sample genotype data and save the typing results to the outputs folder."
+    },
+    {
+      "id": "mendelian-randomisation-demo",
+      "skill": "mendelian-randomisation",
+      "prompt": "Run Mendelian randomisation analysis to test for causal relationships using the sample instruments data. Save all MR results and sensitivity plots to the outputs folder."
+    },
+    {
+      "id": "multiqc-reporter-demo",
+      "skill": "multiqc-reporter",
+      "prompt": "Aggregate QC reports from multiple samples into a unified MultiQC report and save it to the outputs folder."
+    },
+    {
+      "id": "profile-report-demo",
+      "skill": "profile-report",
+      "prompt": "Generate a unified personal genomic profile report from the sample patient data, covering ancestry, pharmacogenomics, disease risk, and traits. Save the report to the outputs folder."
+    },
+    {
+      "id": "recombinator-demo",
+      "skill": "recombinator",
+      "prompt": "Simulate offspring genomes from a pair of parent genomes via meiotic recombination using the bundled genome data. Save the simulated offspring genotypes and crossover maps to the outputs folder."
+    },
+    {
+      "id": "seq-wrangler-demo",
+      "skill": "seq-wrangler",
+      "prompt": "Run sequence quality control and alignment on the sample FASTQ data, then save the QC metrics and alignment stats to the outputs folder."
+    },
+    {
+      "id": "soul2dna-demo",
+      "skill": "soul2dna",
+      "prompt": "Compile the bundled SOUL character profiles into synthetic genome representations and save the output genomes to the outputs folder."
+    },
+    {
+      "id": "target-validation-scorer-demo",
+      "skill": "target-validation-scorer",
+      "prompt": "Score and rank drug targets based on evidence from the sample target data. Save the validation report and score tables to the outputs folder."
+    },
+    {
+      "id": "turingdb-graph-demo",
+      "skill": "turingdb-graph",
+      "prompt": "Build a knowledge graph from the sample cohort data and run a few queries to explore relationships. Save the graph and query results to the outputs folder."
+    },
+    {
+      "id": "wes-clinical-report-en-demo",
+      "skill": "wes-clinical-report-en",
+      "prompt": "Generate a clinical report from whole exome sequencing data using the sample configuration, in English. Save the report to the outputs folder."
+    },
+    {
+      "id": "vcf-annotator-demo",
+      "skill": "vcf-annotator",
+      "prompt": "Annotate the sample VCF variants with gene consequences, ClinVar significance, and population frequencies. Save the annotated VCF and summary to the outputs folder."
+    },
+    {
+      "id": "clinical-variant-reporter-demo",
+      "skill": "clinical-variant-reporter",
+      "prompt": "Classify germline variants from the sample VCF according to ACMG guidelines and generate a clinical variant report. Save the report to the outputs folder."
+    },
+    {
+      "id": "galaxy-bridge-demo",
+      "skill": "galaxy-bridge",
+      "prompt": "Search for Galaxy tools suitable for RNA-seq quality control and recommend a workflow. Save the tool recommendations to the outputs folder."
+    },
+    {
+      "id": "illumina-bridge-demo",
+      "skill": "illumina-bridge",
+      "prompt": "Import and parse a DRAGEN result bundle from the demo data to extract QC metrics, variant calls, and coverage stats. Save the parsed report to the outputs folder."
+    },
+    {
+      "id": "labstep-demo",
+      "skill": "labstep",
+      "prompt": "Browse my electronic lab notebook to find recent experiments and protocols using the demo data. Save the experiment listing to the outputs folder."
+    },
+    {
+      "id": "struct-predictor-demo",
+      "skill": "struct-predictor",
+      "prompt": "Predict the 3D structure of trp-cage miniprotein using Boltz with the demo configuration. Save the predicted structure and confidence plots to the outputs folder."
+    },
+    {
+      "id": "nutrigx-advisor-demo",
+      "skill": "nutrigx_advisor",
+      "prompt": "Generate a personalised nutrition report based on my genetic data from the sample genotype file. Save the nutrition report to the outputs folder."
+    }
+  ]
+}

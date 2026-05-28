@@ -1,0 +1,22 @@
+{
+  "path": "/home/node/.openclaw/agents/main/sessions/sessions.json",
+  "count": 1,
+  "activeMinutes": null,
+  "sessions": [
+    {
+      "key": "agent:main:main",
+      "updatedAt": 1776169727705,
+      "ageMs": 653558400,
+      "sessionId": "fd22e4bb-d830-4478-8400-fa3ce3e54c5d",
+      "systemSent": true,
+      "abortedLastRun": false,
+      "totalTokens": null,
+      "totalTokensFresh": false,
+      "model": "glm-5.1-fp8",
+      "modelProvider": "default",
+      "contextTokens": 200000,
+      "agentId": "main",
+      "kind": "direct"
+    }
+  ]
+}

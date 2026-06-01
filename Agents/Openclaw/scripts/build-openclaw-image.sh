@@ -8,6 +8,8 @@
 #   OPENCLAW_REPO   OpenClaw git repo URL  (default: https://github.com/openclaw/openclaw.git)
 #   OPIK_PLUGIN_WORKSPACE  sii-opik-plugin checkout (default: /workspace/sii-opik-plugin)
 #   TRACE_PLUGIN_SOURCE_DIR  optional override for the plugin checkout
+#   OPIK_PLUGIN_GIT_URL  sii-opik-plugin git repo URL (used only when the workspace is cloned)
+#   OPIK_PLUGIN_GIT_REF  git ref checked out on clone (default: pinned stable tag)
 #   NPM_CONFIG_REGISTRY  npm/pnpm registry mirror for builds
 #   PIP_INDEX_URL        pip index mirror for the Opik image layer
 #   PIP_EXTRA_INDEX_URL  optional extra pip index for the Opik image layer
@@ -23,7 +25,8 @@ OPENCLAW_REPO="${OPENCLAW_REPO:-https://github.com/openclaw/openclaw.git}"
 OPENCLAW_CACHE="$PROJECT_DIR/cache/openclaw"
 OPIK_PLUGIN_WORKSPACE="${OPIK_PLUGIN_WORKSPACE:-/workspace/sii-opik-plugin}"
 OPIK_PLUGIN_GIT_URL="${OPIK_PLUGIN_GIT_URL:-https://github.com/sii-system/sii-opik-plugin.git}"
-OPIK_PLUGIN_GIT_REF="${OPIK_PLUGIN_GIT_REF:-sii-dev}"
+# Pinned stable sii-opik-plugin release; override OPIK_PLUGIN_GIT_REF to track another ref.
+OPIK_PLUGIN_GIT_REF="${OPIK_PLUGIN_GIT_REF:-v0.1.0}"
 TRACE_PLUGIN_SOURCE_DIR="${TRACE_PLUGIN_SOURCE_DIR:-$OPIK_PLUGIN_WORKSPACE}"
 PLUGIN_SRC="$TRACE_PLUGIN_SOURCE_DIR/harness/openclaw"
 

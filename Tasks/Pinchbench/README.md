@@ -65,6 +65,18 @@ API_KEY="$PROVIDER_API_KEY" \
 MODEL_ID="your-model-id" \
 ./Agents/Openclaw/scripts/setup.sh 3
 
+# To enable tracing OpenClaw to Opik, build the opik-enabled image first
+# and pass the Opik config at setup (OPIK_URL and OPIK_PROJECT_NAME required):
+#   OPIK_PLUGIN=enabled ./Agents/Openclaw/scripts/build-openclaw-image.sh
+#
+#   OPIK_PLUGIN=enabled \
+#   OPIK_URL="https://opik.example.com/api/" \
+#   OPIK_PROJECT_NAME="my-project" \
+#   BASE_URL="https://your-openai-compatible-endpoint/v1" \
+#   API_KEY="$PROVIDER_API_KEY" \
+#   MODEL_ID="your-model-id" \
+#   ./Agents/Openclaw/scripts/setup.sh 3
+
 docker compose -f Agents/Openclaw/docker-compose.yml up -d
 ./Agents/Openclaw/scripts/openclaw-fleet.sh status
 

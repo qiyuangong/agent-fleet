@@ -1,0 +1,34 @@
+# Python caches and test artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node/build artifacts
+node_modules/
+dist/
+
+# Local secrets and generated environment files
+.env
+.env.*
+*.local.env
+Agents/Openclaw/.env
+
+# Runtime outputs and local caches
+runs/
+*/runs/
+Agents/Openclaw/cache/
+Tasks/clawBio/cache/
+
+# Logs
+*.log
+
+# Local certificates and keys
+*.pem
+*.key
+*.crt
+*.cert
+
+# OS/editor noise
+.DS_Store

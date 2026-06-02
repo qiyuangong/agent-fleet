@@ -14,7 +14,9 @@ Agents/utils/common/Harbor/
 ├── harboropik.sh               # Harbor CLI wrapper with Opik setup
 ├── prepare_local_deps.sh       # Local package/cache preparation
 ├── harbor_prepare_runner_cli.py
-└── harbor_worker_utils.py
+├── harbor_worker_utils.py
+└── scripts/
+    └── online_rule_analyzer.py # Optional console-only online analysis
 ```
 
 ## Path Resolution
@@ -83,6 +85,7 @@ Typical dataset paths:
 | `TB_TIMEOUT_MULTIPLIER` | General Harbor timeout multiplier |
 | `TB_AGENT_TIMEOUT_MULTIPLIER` | Agent execution timeout override |
 | `TB_AGENT_SETUP_TIMEOUT_MULTIPLIER` | Agent setup timeout multiplier |
+| `HARBOR_ONLINE_ANALYSIS` | Enables console-only online analysis, default `0` |
 
 ## Agent Variables
 
@@ -140,3 +143,26 @@ complete checkout at `OPIK_PLUGIN_WORKSPACE` before running.
 3. Each worker pane runs `run_harbor_worker.sh`.
 4. Workers claim tasks from the shared queue and call `harboropik.sh`.
 5. `harboropik.sh` prepares Opik/tracing settings and invokes Harbor with either Claude Code or OpenCode.
+
+## Optional Harbor Monitor Diagnostics
+
+When `HARBOR_ONLINE_ANALYSIS=1`, `start.sh` launches a tailer that reads only:
+
+```text
+<OUTPUT_PATH>/<task-id>-<task-name>.console.log
+```
+
+`harboropik.sh` emits `[ONLINE_ENV]` JSON lines after deterministic setup
+checks fail. The analyzer marks allowlisted fatal events as task-blocking and
+reports raw text matches without changing task execution. Opik observability
+failures are excluded because they do not determine task execution status.
+The existing Harbor monitor displays aggregated structured environment signals
+next to its exception statistics. Agent exceptions remain in the existing
+exception statistics section to avoid duplicate reporting.
+
+Outputs:
+
+```text
+<OUTPUT_PATH>/online-analysis/environment-events.jsonl
+<OUTPUT_PATH>/online-analysis/environment-summary.json
+```

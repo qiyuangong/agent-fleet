@@ -34,6 +34,42 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/env.sh"
 
+online_env_event() {
+  if [[ "$HARBOR_ONLINE_ANALYSIS" != "1" ]]; then
+    return 0
+  fi
+
+  local phase="$1"
+  local component="$2"
+  local event="$3"
+  local severity="$4"
+  local fatal="$5"
+  local message="$6"
+  if ! command -v python3 >/dev/null 2>&1; then
+    printf '%s\n' '[ONLINE_ENV] {"schema":1,"task_id":null,"task_name":"","phase":"preflight","component":"host_prerequisite","event":"command_unavailable","severity":"critical","fatal":true,"scope":"task","message":"python3 is unavailable; structured event details could not be serialized"}'
+    return 0
+  fi
+  python3 - "$phase" "$component" "$event" "$severity" "$fatal" "$message" <<'PY'
+import json
+import os
+import sys
+
+phase, component, event, severity, fatal, message = sys.argv[1:]
+print("[ONLINE_ENV] " + json.dumps({
+    "schema": 1,
+    "task_id": int(os.environ["TB_TASK_INDEX"]) if os.environ.get("TB_TASK_INDEX", "").isdigit() else None,
+    "task_name": os.environ.get("TB_TASK_ID", ""),
+    "phase": phase,
+    "component": component,
+    "event": event,
+    "severity": severity,
+    "fatal": fatal == "true",
+    "scope": "task",
+    "message": message,
+}, separators=(",", ":")))
+PY
+}
+
 normalize_opik_url_override() {
   local normalized="${OPIK_URL_OVERRIDE%/}"
   if [[ "$normalized" != */api ]]; then
@@ -58,6 +94,7 @@ resolve_opik_health_url() {
 
 need_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
+    online_env_event "preflight" "host_prerequisite" "command_unavailable" "critical" "true" "missing required command: $1"
     echo "[ERROR] missing command: $1" >&2
     exit 1
   fi
@@ -188,6 +225,7 @@ maybe_report_fix_git_image() {
 ensure_docker_daemon() {
   need_cmd docker
   if ! docker info >/dev/null 2>&1; then
+    online_env_event "preflight" "docker" "daemon_unavailable" "critical" "true" "docker info failed; Harbor cannot execute task containers"
     echo "[ERROR] Docker daemon is not running. Harbor requires Docker to execute tasks." >&2
     echo "[ERROR] start Docker Desktop (or another Docker daemon) and retry." >&2
     echo "[ERROR] quick check: docker info" >&2
@@ -307,10 +345,12 @@ docker_hub_preflight_check() {
 
   if [[ "$preflight_failed" == "1" ]]; then
     if [[ "$TB_DOCKERHUB_PREFLIGHT_STRICT" == "1" ]]; then
+      online_env_event "preflight" "docker_registry" "connectivity_unavailable" "critical" "true" "Docker Hub preflight failed in strict mode"
       echo "[ERROR] Docker Hub preflight failed in strict mode." >&2
       echo "[ERROR] fix network/proxy/registry mirror first, or set TB_DOCKERHUB_PREFLIGHT_STRICT=0 / TB_SKIP_DOCKERHUB_PREFLIGHT=1." >&2
       exit 1
     fi
+    online_env_event "preflight" "docker_registry" "connectivity_degraded" "warning" "false" "Docker Hub preflight failed; continuing because strict mode is disabled"
     echo "[WARN] Docker Hub preflight failed, continuing (strict mode disabled)." >&2
     echo "[WARN] if image pull fails later, set a proxy/registry mirror and retry." >&2
   fi
@@ -393,6 +433,7 @@ run_tb() {
 
   local normalized_llm_kwargs
   if ! normalized_llm_kwargs="$(normalize_json_or_fail "$TB_LLM_KWARGS")"; then
+    online_env_event "agent_setup" "agent_configuration" "invalid_llm_kwargs" "critical" "true" "TB_LLM_KWARGS is not valid JSON"
     echo "[ERROR] TB_LLM_KWARGS is not valid JSON" >&2
     echo "[ERROR] current TB_LLM_KWARGS: $TB_LLM_KWARGS" >&2
     exit 1
@@ -432,6 +473,7 @@ PY
       TB_ANTHROPIC_AUTH_TOKEN="$inferred_api_key"
       echo "[INFO] TB_ANTHROPIC_AUTH_TOKEN is empty; using api_key from TB_LLM_KWARGS"
     else
+      online_env_event "agent_setup" "agent_configuration" "auth_token_missing" "critical" "true" "TB_ANTHROPIC_AUTH_TOKEN and TB_LLM_KWARGS.api_key are both missing"
       echo "[ERROR] TB_ANTHROPIC_AUTH_TOKEN is empty and TB_LLM_KWARGS.api_key is missing" >&2
       exit 1
     fi

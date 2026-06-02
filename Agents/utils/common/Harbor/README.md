@@ -12,6 +12,12 @@ bash start.sh --detach
 
 Use `bash start.sh` instead of `--detach` for an interactive zellij session.
 
+Optional console-only online analysis:
+
+```bash
+HARBOR_ONLINE_ANALYSIS=1 bash start.sh --detach
+```
+
 ## Minimal Setup
 
 Edit these fields in `env.sh`:

@@ -122,6 +122,27 @@ else:
 PY
 }
 
+environment_signal_stats() {
+  python3 - "$HARBOR_ONLINE_ANALYSIS_DIR/environment-summary.json" <<'PY'
+import json
+import sys
+
+try:
+    with open(sys.argv[1], encoding="utf-8") as handle:
+        summary = json.load(handle)
+except (FileNotFoundError, json.JSONDecodeError):
+    print("(none)")
+    raise SystemExit(0)
+
+counter = summary.get("monitor_environment_events_by_type") or {}
+if not counter:
+    print("(none)")
+else:
+    for name, count in sorted(counter.items(), key=lambda item: (-item[1], item[0]))[:10]:
+        print(f"{name}: {count}")
+PY
+}
+
 while true; do
   # Detached zellij panes may not have TERM set; do not let clear kill monitor.
   clear 2>/dev/null || printf '\033[H\033[2J'
@@ -183,6 +204,11 @@ while true; do
   echo
   echo "exception stats:"
   exception_stats
+  if [[ "$HARBOR_ONLINE_ANALYSIS" == "1" ]]; then
+    echo
+    echo "environment signal stats:"
+    environment_signal_stats
+  fi
   echo
   echo "active workers:"
 

@@ -26,6 +26,28 @@ ensure_zellij_web_sharing_config() {
   fi
 }
 
+harbor_start_online_analysis_if_enabled() {
+  if [[ "$HARBOR_ONLINE_ANALYSIS" != "1" ]]; then
+    return 0
+  fi
+  if [[ -f "$HARBOR_ONLINE_ANALYSIS_PID_FILE" ]]; then
+    local existing_pid
+    existing_pid="$(cat "$HARBOR_ONLINE_ANALYSIS_PID_FILE" 2>/dev/null || true)"
+    if [[ -n "$existing_pid" ]] && kill -0 "$existing_pid" >/dev/null 2>&1; then
+      return 0
+    fi
+  fi
+
+  mkdir -p "$HARBOR_ONLINE_ANALYSIS_DIR" "$RUNTIME_DIR"
+  nohup python3 "$SCRIPT_DIR/scripts/online_rule_analyzer.py" \
+    "$OUTPUT_PATH" \
+    --follow \
+    --poll-interval "$HARBOR_ONLINE_ANALYSIS_POLL_INTERVAL" \
+    --output-dir "$HARBOR_ONLINE_ANALYSIS_DIR" \
+    >>"$HARBOR_ONLINE_ANALYSIS_LOG_FILE" 2>&1 &
+  printf '%s\n' "$!" >"$HARBOR_ONLINE_ANALYSIS_PID_FILE"
+}
+
 harbor_init_run_dirs
 harbor_ensure_dataset
 if [[ "${RESET_RUN:-0}" == "1" ]]; then
@@ -34,6 +56,7 @@ if [[ "${RESET_RUN:-0}" == "1" ]]; then
   harbor_reset_run_state
 fi
 harbor_prepare_task_file
+harbor_start_online_analysis_if_enabled
 
 if [[ $# -gt 0 ]]; then
   exec "$@"

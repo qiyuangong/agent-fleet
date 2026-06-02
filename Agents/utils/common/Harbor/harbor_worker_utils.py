@@ -101,6 +101,52 @@ def stream_claude_log(task_root: Path) -> int:
                 print(f"[result] {_clean(event.get('result'))}", flush=True)
 
 
+def stream_opencode_log(task_root: Path) -> int:
+    log = None
+    while log is None:
+        matches = sorted(
+            task_root.rglob("agent/opencode.txt"), key=lambda p: p.stat().st_mtime
+        )
+        if matches:
+            log = matches[-1]
+            break
+        time.sleep(1)
+
+    with log.open("r", encoding="utf-8", errors="replace") as handle:
+        while True:
+            line = handle.readline()
+            if not line:
+                time.sleep(0.5)
+                continue
+            try:
+                event = json.loads(line)
+            except Exception:
+                continue
+
+            part = event.get("part") if isinstance(event.get("part"), dict) else {}
+            ptype = part.get("type")
+            if ptype in {"text", "reasoning"} and part.get("text"):
+                print(f"[llm] {_clean(part.get('text'))}", flush=True)
+            elif ptype == "tool":
+                state = part.get("state") if isinstance(part.get("state"), dict) else {}
+                name = part.get("tool") or state.get("tool") or "tool"
+                status = state.get("status") or part.get("status") or ""
+                inp = state.get("input") or part.get("input") or {}
+                out = state.get("output") or part.get("output")
+                detail = inp.get("command") or inp.get("file_path") or inp if isinstance(inp, dict) else inp
+                suffix = f" {status}" if status else ""
+                if detail:
+                    print(f"[tool] {name}{suffix}: {_clean(detail)}", flush=True)
+                else:
+                    print(f"[tool] {name}{suffix}", flush=True)
+                if out:
+                    print(f"[tool_result] {_clean(out)}", flush=True)
+            elif event.get("type") in {"result", "error"}:
+                value = event.get("result") or event.get("error") or event.get("message")
+                if value:
+                    print(f"[result] {_clean(value)}", flush=True)
+
+
 def prepare_claude_timeout_backup(logs_dir: Path, project_name: str) -> int:
     backup_state = logs_dir / "opik-runtime-state.json"
     backup_transcript = logs_dir / "opik-runtime-transcript.jsonl"
@@ -139,7 +185,14 @@ def prepare_claude_timeout_backup(logs_dir: Path, project_name: str) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "command", choices=("latest-result", "summarize-result", "stream-claude-log", "prepare-claude-timeout-backup")
+        "command",
+        choices=(
+            "latest-result",
+            "summarize-result",
+            "stream-claude-log",
+            "stream-opencode-log",
+            "prepare-claude-timeout-backup",
+        ),
     )
     parser.add_argument("path")
     parser.add_argument("--project-name", default="")
@@ -152,6 +205,8 @@ def main() -> int:
         return summarize_result(path)
     if args.command == "prepare-claude-timeout-backup":
         return prepare_claude_timeout_backup(path, args.project_name)
+    if args.command == "stream-opencode-log":
+        return stream_opencode_log(path)
     return stream_claude_log(path)
 
 

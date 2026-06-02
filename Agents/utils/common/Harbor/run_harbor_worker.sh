@@ -16,12 +16,12 @@ fi
 
 CURRENT_FILE="$QUEUE_DIR/worker-${WORKER_ID}.current"
 WORKER_LOG="$RUNTIME_DIR/worker-logs/worker-${WORKER_ID}.log"
-CLAUDE_TAIL_PID=""
+AGENT_TAIL_PID=""
 
 cleanup() {
   rm -f "$CURRENT_FILE"
-  if [[ -n "${CLAUDE_TAIL_PID:-}" ]]; then
-    kill "$CLAUDE_TAIL_PID" >/dev/null 2>&1 || true
+  if [[ -n "${AGENT_TAIL_PID:-}" ]]; then
+    kill "$AGENT_TAIL_PID" >/dev/null 2>&1 || true
   fi
 }
 trap cleanup EXIT
@@ -45,6 +45,10 @@ summarize_result() {
 
 stream_claude_log() {
   python3 "$SCRIPT_DIR/harbor_worker_utils.py" stream-claude-log "$1"
+}
+
+stream_opencode_log() {
+  python3 "$SCRIPT_DIR/harbor_worker_utils.py" stream-opencode-log "$1"
 }
 
 find_trial_logs_dir() {
@@ -155,23 +159,27 @@ while true; do
   mkdir -p "$task_jobs_root"
   printf '%s\t%s\n' "$task_index" "$task_name" > "$CURRENT_FILE"
   log_msg "starting task ${task_index}: $task_name"
-  # Dry-run does not create Claude JSONL logs; starting the tailer there leaves
-  # a waiting Python process behind after the worker exits.  Tailer is
-  # Claude-Code-specific (reads claude-code.txt stream-json events).
-  if [[ "${TB_DRY_RUN:-0}" != "1" && "$AGENT" == "claude-code" ]]; then
-    stream_claude_log "$task_jobs_root" &
-    CLAUDE_TAIL_PID="$!"
+  # Dry-run does not create agent JSONL logs; starting the tailer there leaves
+  # a waiting Python process behind after the worker exits.
+  if [[ "${TB_DRY_RUN:-0}" != "1" ]]; then
+    if [[ "$AGENT" == "claude-code" ]]; then
+      stream_claude_log "$task_jobs_root" &
+      AGENT_TAIL_PID="$!"
+    elif [[ "$AGENT" == "opencode" ]]; then
+      stream_opencode_log "$task_jobs_root" &
+      AGENT_TAIL_PID="$!"
+    fi
   fi
 
   set +e
   run_claimed_task "$task_name" "$task_jobs_root" 2>&1 | tee "$task_console_log"
   rc=${PIPESTATUS[0]}
   set -e
-  if [[ -n "${CLAUDE_TAIL_PID:-}" ]]; then
-    pkill -TERM -P "$CLAUDE_TAIL_PID" >/dev/null 2>&1 || true
-    kill "$CLAUDE_TAIL_PID" >/dev/null 2>&1 || true
-    wait "$CLAUDE_TAIL_PID" >/dev/null 2>&1 || true
-    CLAUDE_TAIL_PID=""
+  if [[ -n "${AGENT_TAIL_PID:-}" ]]; then
+    pkill -TERM -P "$AGENT_TAIL_PID" >/dev/null 2>&1 || true
+    kill "$AGENT_TAIL_PID" >/dev/null 2>&1 || true
+    wait "$AGENT_TAIL_PID" >/dev/null 2>&1 || true
+    AGENT_TAIL_PID=""
   fi
 
   result_file="$(find_latest_trial_result "$task_jobs_root" || true)"

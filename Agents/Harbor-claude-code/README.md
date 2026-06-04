@@ -16,7 +16,6 @@ bash start.sh
 ```
 
 This directory is not usually launched directly. Use `Agents/utils/common/Harbor/start.sh`.
-The realtime hook is loaded from `OPIK_PLUGIN_WORKSPACE`, defaulting to
-`/workspace/sii-opik-plugin`.
+The realtime hook is loaded from the `third_party/sii-opik-plugin` submodule.
 
 Structure details: [STRUCT.md](./STRUCT.md)

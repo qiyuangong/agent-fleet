@@ -6,10 +6,7 @@
 #
 # Variables:
 #   OPENCLAW_REPO   OpenClaw git repo URL  (default: https://github.com/openclaw/openclaw.git)
-#   OPIK_PLUGIN_WORKSPACE  sii-opik-plugin checkout (default: /workspace/sii-opik-plugin)
-#   TRACE_PLUGIN_SOURCE_DIR  optional override for the plugin checkout
-#   OPIK_PLUGIN_GIT_URL  sii-opik-plugin git repo URL (used only when the workspace is cloned)
-#   OPIK_PLUGIN_GIT_REF  git ref checked out on clone (default: pinned stable tag)
+#   TRACE_PLUGIN_SOURCE_DIR  sii-opik-plugin checkout (default: repo submodule)
 #   NPM_CONFIG_REGISTRY  npm/pnpm registry mirror for builds
 #   PIP_INDEX_URL        pip index mirror for the Opik image layer
 #   PIP_EXTRA_INDEX_URL  optional extra pip index for the Opik image layer
@@ -23,11 +20,7 @@ REPO_ROOT="$(cd "$PROJECT_DIR/../.." && pwd)"
 OPENCLAW_REPO="${OPENCLAW_REPO:-https://github.com/openclaw/openclaw.git}"
 
 OPENCLAW_CACHE="$PROJECT_DIR/cache/openclaw"
-OPIK_PLUGIN_WORKSPACE="${OPIK_PLUGIN_WORKSPACE:-/workspace/sii-opik-plugin}"
-OPIK_PLUGIN_GIT_URL="${OPIK_PLUGIN_GIT_URL:-https://github.com/sii-system/sii-opik-plugin.git}"
-# Pinned stable sii-opik-plugin release; override OPIK_PLUGIN_GIT_REF to track another ref.
-OPIK_PLUGIN_GIT_REF="${OPIK_PLUGIN_GIT_REF:-v0.1.0}"
-TRACE_PLUGIN_SOURCE_DIR="${TRACE_PLUGIN_SOURCE_DIR:-$OPIK_PLUGIN_WORKSPACE}"
+TRACE_PLUGIN_SOURCE_DIR="${TRACE_PLUGIN_SOURCE_DIR:-$REPO_ROOT/third_party/sii-opik-plugin}"
 PLUGIN_SRC="$TRACE_PLUGIN_SOURCE_DIR/harness/openclaw"
 
 OPIK_DOCKER_BUILD_ARGS=()
@@ -48,42 +41,6 @@ add_opik_build_arg PIP_INDEX_URL
 add_opik_build_arg PIP_EXTRA_INDEX_URL
 add_opik_build_arg PIP_TRUSTED_HOST
 add_opik_build_arg NPM_CONFIG_REGISTRY
-
-opik_plugin_workspace_complete() {
-  [ -d "$PLUGIN_SRC" ] &&
-    [ -f "$TRACE_PLUGIN_SOURCE_DIR/harness/openclaw/package.json" ] &&
-    [ -f "$TRACE_PLUGIN_SOURCE_DIR/src/sii_opik_plugin/openclaw/openclaw_opik_tracer.py" ] &&
-    [ -f "$TRACE_PLUGIN_SOURCE_DIR/requirements.txt" ]
-}
-
-ensure_opik_plugin_workspace() {
-  if opik_plugin_workspace_complete; then
-    return 0
-  fi
-
-  if [ -e "$TRACE_PLUGIN_SOURCE_DIR" ]; then
-    echo "Error: sii-opik-plugin workspace is incomplete: $TRACE_PLUGIN_SOURCE_DIR" >&2
-    echo "Set OPIK_PLUGIN_WORKSPACE or TRACE_PLUGIN_SOURCE_DIR to a complete checkout." >&2
-    exit 1
-  fi
-
-  if ! command -v git >/dev/null 2>&1; then
-    echo "Error: missing command: git" >&2
-    exit 1
-  fi
-
-  echo "Cloning sii-opik-plugin into: $TRACE_PLUGIN_SOURCE_DIR"
-  mkdir -p "$(dirname "$TRACE_PLUGIN_SOURCE_DIR")"
-  git clone "$OPIK_PLUGIN_GIT_URL" "$TRACE_PLUGIN_SOURCE_DIR"
-  if [ -n "$OPIK_PLUGIN_GIT_REF" ]; then
-    git -C "$TRACE_PLUGIN_SOURCE_DIR" checkout "$OPIK_PLUGIN_GIT_REF"
-  fi
-
-  if ! opik_plugin_workspace_complete; then
-    echo "Error: sii-opik-plugin checkout is incomplete after clone: $TRACE_PLUGIN_SOURCE_DIR" >&2
-    exit 1
-  fi
-}
 
 update_npmrc_mirror() {
   local repo_dir="$1"
@@ -153,19 +110,20 @@ fi
 echo ""
 echo "OPIK_PLUGIN=enabled — building opik layer..."
 
-# ── Step 3: Ensure the sii-opik-plugin workspace ──
-ensure_opik_plugin_workspace
+# ── Step 3: Verify the sii-opik-plugin submodule ──
+if [ ! -d "$PLUGIN_SRC" ] || [ ! -f "$TRACE_PLUGIN_SOURCE_DIR/src/sii_opik_plugin/openclaw/openclaw_opik_tracer.py" ]; then
+  echo "Error: sii-opik-plugin submodule is missing or incomplete: $TRACE_PLUGIN_SOURCE_DIR" >&2
+  echo "Run: git submodule update --init --recursive" >&2
+  exit 1
+fi
 
 # ── Step 4: Build openclaw:local-opik ──
 echo "Building openclaw:local-opik..."
-OPIK_BUILD_CONTEXT="$(mktemp -d "${TMPDIR:-/tmp}/openclaw-opik-context.XXXXXX")"
-trap 'rm -rf "$OPIK_BUILD_CONTEXT"' EXIT
-cp -R "$TRACE_PLUGIN_SOURCE_DIR" "$OPIK_BUILD_CONTEXT/sii-opik-plugin"
 docker buildx build --load \
   "${OPIK_DOCKER_BUILD_ARGS[@]}" \
   -t openclaw:local-opik \
   -f "$PROJECT_DIR/Dockerfile.opik" \
-  "$OPIK_BUILD_CONTEXT"
+  "$REPO_ROOT"
 
 echo ""
 echo "Done. Image: openclaw:local-opik"

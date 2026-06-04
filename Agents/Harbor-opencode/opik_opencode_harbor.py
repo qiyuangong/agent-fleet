@@ -32,7 +32,7 @@ REPO_ROOT = ROOT.parents[1]
 TRACE_PLUGIN_SOURCE_DIR = Path(
     os.environ.get(
         "TRACE_PLUGIN_SOURCE_DIR",
-        os.environ.get("OPIK_PLUGIN_WORKSPACE", "/workspace/sii-opik-plugin"),
+        REPO_ROOT / "third_party" / "sii-opik-plugin",
     )
 ).expanduser()
 PLUGIN_TS = Path(

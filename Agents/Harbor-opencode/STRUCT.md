@@ -16,11 +16,12 @@ Agents/Harbor-opencode/
 
 `finalize_opencode_sessions.py` collects and finalizes OpenCode trace/session output after a worker finishes.
 
-The OpenCode plugin and realtime hook are loaded from `OPIK_PLUGIN_WORKSPACE`, which defaults to `/workspace/sii-opik-plugin`:
+The OpenCode plugin and realtime hook are loaded from the
+`third_party/sii-opik-plugin` submodule:
 
 ```text
-/workspace/sii-opik-plugin/harness/opencode/opik-trace.ts
-/workspace/sii-opik-plugin/src/sii_opik_plugin/opencode/opencode_realtime_trace.py
+third_party/sii-opik-plugin/harness/opencode/opik-trace.ts
+third_party/sii-opik-plugin/src/sii_opik_plugin/opencode/opencode_realtime_trace.py
 ```
 
 `Agents/utils/common/Harbor/env.sh` exposes this directory as `HARBOR_OPENCODE_DIR`.

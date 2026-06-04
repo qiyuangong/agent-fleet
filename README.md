@@ -4,13 +4,18 @@ SII Agent Fleet provides runnable agent integrations and benchmark task lists fo
 
 ## Quick Start: Harbor
 
-Prepare the Opik plugin checkout. The default location is:
+Clone the repository with the Opik plugin submodule:
 
 ```bash
-/workspace/sii-opik-plugin
+git clone --recurse-submodules https://github.com/sii-system/sii-agent-fleet.git
 ```
 
-If the plugin repository is private or the runtime cannot access GitHub, place a complete `sii-opik-plugin` checkout there before running.
+If you already cloned the repository without submodules, initialize them before
+using Opik-enabled agents:
+
+```bash
+git submodule update --init --recursive
+```
 
 Edit the Harbor environment file:
 
@@ -32,7 +37,6 @@ MODEL="minimax2.7"
 BASE_URL="https://your-openai-compatible-endpoint"
 API_KEY="your-api-key"
 
-OPIK_PLUGIN_WORKSPACE="/workspace/sii-opik-plugin"
 OPIK_URL="http://your-opik-host/api"
 OPIK_PROJECT_NAME="your-project-name"
 ```

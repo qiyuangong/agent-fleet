@@ -5,7 +5,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export RUN_ID="${RUN_ID:-$(date +%Y-%m-%d-%H%M)-harbor-tui}"
 . "$SCRIPT_DIR/env.sh"
 harbor_validate_agent
-harbor_ensure_opik_plugin_workspace
 
 DETACH_MODE=false
 if [[ "${1:-}" == "--detach" ]]; then

@@ -149,10 +149,7 @@ TB_AGENT_SETUP_TIMEOUT_MULTIPLIER="${TB_AGENT_SETUP_TIMEOUT_MULTIPLIER:-20}"
 TB_FORCE_BUILD="${TB_FORCE_BUILD:-0}"
 TB_DEBUG="${TB_DEBUG:-0}"
 TB_CC_OPIK_ENABLE_HOOK="${TB_CC_OPIK_ENABLE_HOOK:-1}"
-OPIK_PLUGIN_WORKSPACE="${OPIK_PLUGIN_WORKSPACE:-/workspace/sii-opik-plugin}"
-OPIK_PLUGIN_GIT_URL="${OPIK_PLUGIN_GIT_URL:-https://github.com/sii-system/sii-opik-plugin.git}"
-OPIK_PLUGIN_GIT_REF="${OPIK_PLUGIN_GIT_REF:-sii-dev}"
-TRACE_PLUGIN_SOURCE_DIR="${TRACE_PLUGIN_SOURCE_DIR:-$OPIK_PLUGIN_WORKSPACE}"
+TRACE_PLUGIN_SOURCE_DIR="${TRACE_PLUGIN_SOURCE_DIR:-$REPO_ROOT/third_party/sii-opik-plugin}"
 TRACE_PLUGIN_CLAUDE_HOOK_SOURCE="${TRACE_PLUGIN_CLAUDE_HOOK_SOURCE:-$TRACE_PLUGIN_SOURCE_DIR/src/sii_opik_plugin/claude_code/claude_realtime_trace.py}"
 TRACE_PLUGIN_OPENCODE_PLUGIN_SOURCE="${TRACE_PLUGIN_OPENCODE_PLUGIN_SOURCE:-$TRACE_PLUGIN_SOURCE_DIR/harness/opencode/opik-trace.ts}"
 TRACE_PLUGIN_OPENCODE_HOOK_SOURCE="${TRACE_PLUGIN_OPENCODE_HOOK_SOURCE:-$TRACE_PLUGIN_SOURCE_DIR/src/sii_opik_plugin/opencode/opencode_realtime_trace.py}"
@@ -234,7 +231,7 @@ export TB_DATASET_GIT_URL TB_PATH TB_LIMIT TB_RUNS TB_AGENT TB_AGENT_IMPORT_PATH
 export TB_N_CONCURRENT TB_MAX_RETRIES TB_RETRY_INCLUDE_EXCEPTIONS TB_RETRY_EXCLUDE_EXCEPTIONS TB_AK_MAX_TURNS TB_DISALLOWED_TOOLS TB_APPEND_SYSTEM_PROMPT
 export TB_API_BASE TB_LLM_KWARGS TB_MAX_NEW_TOKENS TB_MODEL_INFO TB_ANTHROPIC_BASE_URL TB_ANTHROPIC_AUTH_TOKEN TB_CLAUDE_CODE_MAX_OUTPUT_TOKENS
 export TB_CLAUDE_CODE_DISABLE_AUTOUPDATER TB_ANTHROPIC_MODEL TB_ANTHROPIC_DEFAULT_OPUS_MODEL TB_ANTHROPIC_DEFAULT_SONNET_MODEL TB_ANTHROPIC_DEFAULT_HAIKU_MODEL TB_CLAUDE_CODE_SUBAGENT_MODEL TB_CLAUDE_CODE_EFFORT_LEVEL
-export TB_TIMEOUT_MULTIPLIER TB_AGENT_TIMEOUT_MULTIPLIER TB_AGENT_SETUP_TIMEOUT_MULTIPLIER TB_FORCE_BUILD TB_DEBUG OPIK_PLUGIN_WORKSPACE OPIK_PLUGIN_GIT_URL OPIK_PLUGIN_GIT_REF TRACE_PLUGIN_SOURCE_DIR TRACE_PLUGIN_CLAUDE_HOOK_SOURCE TRACE_PLUGIN_OPENCODE_PLUGIN_SOURCE TRACE_PLUGIN_OPENCODE_HOOK_SOURCE TB_CC_OPIK_ENABLE_HOOK
+export TB_TIMEOUT_MULTIPLIER TB_AGENT_TIMEOUT_MULTIPLIER TB_AGENT_SETUP_TIMEOUT_MULTIPLIER TB_FORCE_BUILD TB_DEBUG TRACE_PLUGIN_SOURCE_DIR TRACE_PLUGIN_CLAUDE_HOOK_SOURCE TRACE_PLUGIN_OPENCODE_PLUGIN_SOURCE TRACE_PLUGIN_OPENCODE_HOOK_SOURCE TB_CC_OPIK_ENABLE_HOOK
 export TB_CC_HOOK_SOURCE TB_CC_HOOK_MOUNT_PATH TB_CC_CLAUDE_TGZ_SOURCE TB_CC_CLAUDE_TGZ_MOUNT_PATH
 export TB_CC_PY_WHEEL_DIR_SOURCE TB_CC_PY_WHEEL_DIR_MOUNT_PATH TB_CC_NPM_CACHE_MOUNT_PATH TB_VERIFIER_UV_HOME TB_VERIFIER_UV_BIN_DIR_MOUNT_PATH TB_TRACE_TO_OPIK TB_CC_OPIK_DEBUG TB_CC_OPIK_INSTALL_DEPS
 export TB_PIP_INDEX_URL TB_PIP_EXTRA_INDEX_URL TB_PIP_TRUSTED_HOST TB_UV_INDEX_URL TB_UV_DEFAULT_INDEX TB_PIP_DEFAULT_TIMEOUT TB_PIP_RETRIES
@@ -242,77 +239,6 @@ export OPIK_REPO_DIR COMPOSE_DIR TB_SKIP_DOCKERHUB_PREFLIGHT TB_DOCKERHUB_CHECK_
 export OPENCODE_PROVIDER OPENCODE_VERSION OPENCODE_TGZ_BASENAME OPENCODE_LINUX_X64_TGZ_BASENAME OPENCODE_CONFIG_CONTENT
 export NEXT_INDEX_FILE LOCK_FILE WORKERS_READY_FILE WORKERS_FAILED_FILE
 export PATH="/opt/tb-venv/bin:${PATH}"
-
-harbor_trace_plugin_required_paths() {
-  local trace_enabled="${TRACE_TO_OPIK:-${TB_TRACE_TO_OPIK:-}}"
-  if [[ "$AGENT" == "opencode" ]]; then
-    local oc_trace="${TB_TRACE_TO_OPIK:-${TRACE_TO_OPIK:-}}"
-    if [[ "$oc_trace" == "true" || "$oc_trace" == "1" ]]; then
-      printf '%s\n' "$TRACE_PLUGIN_OPENCODE_PLUGIN_SOURCE"
-      printf '%s\n' "$TRACE_PLUGIN_OPENCODE_HOOK_SOURCE"
-    fi
-  elif [[ "$trace_enabled" == "true" || "$trace_enabled" == "1" || "$TB_CC_OPIK_ENABLE_HOOK" == "1" ]]; then
-    printf '%s\n' "$TRACE_PLUGIN_CLAUDE_HOOK_SOURCE"
-  fi
-}
-
-harbor_trace_plugin_workspace_complete() {
-  local -a required=()
-  mapfile -t required < <(harbor_trace_plugin_required_paths)
-  if [[ "${#required[@]}" -eq 0 ]]; then
-    return 0
-  fi
-
-  local path
-  for path in "${required[@]}"; do
-    if [[ ! -f "$path" ]]; then
-      return 1
-    fi
-  done
-}
-
-harbor_ensure_opik_plugin_workspace() {
-  local -a required=()
-  mapfile -t required < <(harbor_trace_plugin_required_paths)
-  if [[ "${#required[@]}" -eq 0 ]]; then
-    export HARBOR_OPIK_PLUGIN_READY=1
-    return 0
-  fi
-
-  if harbor_trace_plugin_workspace_complete; then
-    export HARBOR_OPIK_PLUGIN_READY=1
-    return 0
-  fi
-
-  if [[ -e "$TRACE_PLUGIN_SOURCE_DIR" ]]; then
-    echo "[ERROR] sii-opik-plugin workspace is incomplete: $TRACE_PLUGIN_SOURCE_DIR" >&2
-    local path
-    for path in "${required[@]}"; do
-      if [[ ! -f "$path" ]]; then
-        echo "[ERROR] missing trace plugin source: $path" >&2
-      fi
-    done
-    echo "[ERROR] fix the checkout or set OPIK_PLUGIN_WORKSPACE / TRACE_PLUGIN_SOURCE_DIR to a complete sii-opik-plugin repo." >&2
-    return 1
-  fi
-
-  if ! command -v git >/dev/null 2>&1; then
-    echo "[ERROR] missing command: git" >&2
-    return 1
-  fi
-  echo "[INFO] cloning sii-opik-plugin into: $TRACE_PLUGIN_SOURCE_DIR"
-  mkdir -p "$(dirname "$TRACE_PLUGIN_SOURCE_DIR")"
-  git clone "$OPIK_PLUGIN_GIT_URL" "$TRACE_PLUGIN_SOURCE_DIR"
-  if [[ -n "$OPIK_PLUGIN_GIT_REF" ]]; then
-    git -C "$TRACE_PLUGIN_SOURCE_DIR" checkout "$OPIK_PLUGIN_GIT_REF"
-  fi
-
-  if ! harbor_trace_plugin_workspace_complete; then
-    echo "[ERROR] sii-opik-plugin checkout is incomplete after clone: $TRACE_PLUGIN_SOURCE_DIR" >&2
-    return 1
-  fi
-  export HARBOR_OPIK_PLUGIN_READY=1
-}
 
 harbor_init_run_dirs() {
   mkdir -p "$OUTPUT_PATH" "$QUEUE_DIR" "$RUNTIME_DIR/worker-logs" "$JOBS_ROOT"

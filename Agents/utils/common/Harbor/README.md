@@ -33,12 +33,16 @@ MODEL="minimax2.7"
 BASE_URL="https://your-openai-compatible-endpoint"
 API_KEY="your-api-key"
 
-OPIK_PLUGIN_WORKSPACE="/workspace/sii-opik-plugin"
 OPIK_URL="http://your-opik-host/api"
 OPIK_PROJECT_NAME="your-project-name"
 ```
 
-`OPIK_PLUGIN_WORKSPACE` must point to a complete `sii-opik-plugin` checkout. If the path is missing, the runner tries to clone the plugin automatically. For private plugin repositories, prepare `/workspace/sii-opik-plugin` manually before running.
+The Opik tracing plugin is loaded from the `third_party/sii-opik-plugin`
+submodule. Initialize it before running:
+
+```bash
+git submodule update --init --recursive
+```
 
 ## Datasets
 

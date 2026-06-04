@@ -69,10 +69,7 @@ Typical dataset paths:
 | `OPIK_URL_OVERRIDE` | Opik API URL forwarded into task containers |
 | `OPIK_API_KEY` | Opik API key |
 | `OPIK_PROJECT_NAME` | Opik project name |
-| `OPIK_PLUGIN_WORKSPACE` | Local `sii-opik-plugin` checkout, default `/workspace/sii-opik-plugin` |
-| `OPIK_PLUGIN_GIT_URL` | Git URL used when the plugin checkout must be cloned |
-| `OPIK_PLUGIN_GIT_REF` | Plugin Git ref checked out after clone |
-| `TRACE_PLUGIN_SOURCE_DIR` | Tracing source path, defaults to `OPIK_PLUGIN_WORKSPACE` |
+| `TRACE_PLUGIN_SOURCE_DIR` | Tracing source path, defaults to `third_party/sii-opik-plugin` |
 | `TRACE_TO_OPIK` | Enables or disables trace upload |
 | `CLAUDE_CODE_VERSION` | Claude Code package version used by local dependency cache |
 | `OPENCODE_VERSION` | OpenCode package version used by local dependency cache |
@@ -111,34 +108,30 @@ OpenCode specific defaults:
 - `TRACE_PLUGIN_OPENCODE_PLUGIN_SOURCE`
 - `TRACE_PLUGIN_OPENCODE_HOOK_SOURCE`
 
-## Opik Plugin Workspace
+## Opik Plugin Submodule
 
-`start.sh` and `monitor_harbor.sh` call `harbor_ensure_opik_plugin_workspace`
-before launching workers. The check requires:
+The tracing plugin is linked as a Git submodule at
+`third_party/sii-opik-plugin`, pinned to tag `v0.1.0`. Initialize it before
+running:
+
+```bash
+git submodule update --init --recursive
+```
+
+The runner checks these files when tracing is enabled:
 
 ```text
 Claude Code:
-  $OPIK_PLUGIN_WORKSPACE/src/sii_opik_plugin/claude_code/claude_realtime_trace.py
+  third_party/sii-opik-plugin/src/sii_opik_plugin/claude_code/claude_realtime_trace.py
 
 OpenCode:
-  $OPIK_PLUGIN_WORKSPACE/harness/opencode/opik-trace.ts
-  $OPIK_PLUGIN_WORKSPACE/src/sii_opik_plugin/opencode/opencode_realtime_trace.py
+  third_party/sii-opik-plugin/harness/opencode/opik-trace.ts
+  third_party/sii-opik-plugin/src/sii_opik_plugin/opencode/opencode_realtime_trace.py
 ```
-
-If these files are missing and `OPIK_PLUGIN_WORKSPACE` does not exist, the
-runner runs:
-
-```bash
-git clone "$OPIK_PLUGIN_GIT_URL" "$OPIK_PLUGIN_WORKSPACE"
-git -C "$OPIK_PLUGIN_WORKSPACE" checkout "$OPIK_PLUGIN_GIT_REF"
-```
-
-If the plugin repository is private or network access is restricted, place a
-complete checkout at `OPIK_PLUGIN_WORKSPACE` before running.
 
 ## Execution Flow
 
-1. `start.sh` sources `env.sh`, validates `AGENT`, ensures the Opik plugin checkout once, initializes output directories, and prepares the task file.
+1. `start.sh` sources `env.sh`, validates `AGENT`, initializes output directories, and prepares the task file.
 2. `gen_harbor_zellij_layout.sh` writes a zellij layout with monitor and worker panes.
 3. Each worker pane runs `run_harbor_worker.sh`.
 4. Workers claim tasks from the shared queue and call `harboropik.sh`.

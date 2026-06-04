@@ -2,7 +2,7 @@
 #
 # Prerequisites:
 #   - openclaw:local must exist
-#   - build context contains sii-opik-plugin/ copied from OPIK_PLUGIN_WORKSPACE
+#   - sii-opik-plugin submodule must be initialized at third_party/sii-opik-plugin
 #
 # Build:
 #   OPIK_PLUGIN=enabled ./Agents/Openclaw/scripts/build-openclaw-image.sh
@@ -16,10 +16,10 @@ ARG PIP_EXTRA_INDEX_URL=""
 ARG PIP_TRUSTED_HOST=""
 ARG NPM_CONFIG_REGISTRY=""
 
-COPY sii-opik-plugin/ /opt/sii-opik-plugin/
+COPY third_party/sii-opik-plugin/ /opt/sii-opik-plugin/
 
 # Install python3-venv (ensurepip not available in base image), build the
-# OpenClaw plugin from sii-opik-plugin, then create the Python tracer venv.
+# OpenClaw plugin from the submodule, then create the Python tracer venv.
 RUN apt-get update && \
     apt-get install -y --no-install-recommends python3.11-venv && \
     rm -rf /var/lib/apt/lists/* && \

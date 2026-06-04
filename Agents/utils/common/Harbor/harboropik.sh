@@ -104,19 +104,22 @@ ensure_trace_plugin_source_if_needed() {
   if [[ "$TB_DRY_RUN" == "1" ]]; then
     return 0
   fi
-  if [[ "${HARBOR_OPIK_PLUGIN_READY:-0}" == "1" ]]; then
-    return 0
-  fi
+  local trace_enabled="${TRACE_TO_OPIK:-${TB_TRACE_TO_OPIK:-}}"
   local -a required=()
-  mapfile -t required < <(harbor_trace_plugin_required_paths)
-
-  harbor_ensure_opik_plugin_workspace
+  if [[ "$AGENT" == "opencode" ]]; then
+    local oc_trace="${TB_TRACE_TO_OPIK:-${TRACE_TO_OPIK:-}}"
+    if [[ "$oc_trace" == "true" || "$oc_trace" == "1" ]]; then
+      required=("$TRACE_PLUGIN_OPENCODE_PLUGIN_SOURCE" "$TRACE_PLUGIN_OPENCODE_HOOK_SOURCE")
+    fi
+  elif [[ "$trace_enabled" == "true" || "$trace_enabled" == "1" || "$TB_CC_OPIK_ENABLE_HOOK" == "1" ]]; then
+    required=("$TRACE_PLUGIN_CLAUDE_HOOK_SOURCE")
+  fi
 
   local path
   for path in "${required[@]}"; do
     if [[ ! -f "$path" ]]; then
       echo "[ERROR] trace plugin source missing: $path" >&2
-      echo "[ERROR] set OPIK_PLUGIN_WORKSPACE or TRACE_PLUGIN_SOURCE_DIR to a complete sii-opik-plugin checkout." >&2
+      echo "[ERROR] run 'git submodule update --init --recursive' from $REPO_ROOT, or set TRACE_PLUGIN_SOURCE_DIR explicitly." >&2
       exit 1
     fi
   done

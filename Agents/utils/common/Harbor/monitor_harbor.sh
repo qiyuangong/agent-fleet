@@ -4,7 +4,6 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/env.sh"
 harbor_validate_agent
-harbor_ensure_opik_plugin_workspace
 
 harbor_init_run_dirs
 harbor_ensure_dataset

@@ -44,8 +44,5 @@ OpenClaw benchmark runners call `Agents/Openclaw` for fleet setup and Docker Com
 
 TUI deployment scripts read `TUI/Dashboard`, `TUI/Nginx/config`, and `TUI/Nginx/scripts` directly.
 
-Opik tracing code is loaded from `OPIK_PLUGIN_WORKSPACE`, defaulting to
-`/workspace/sii-opik-plugin`; it is not vendored into this repository. Harbor
-and OpenClaw entrypoints can clone `OPIK_PLUGIN_GIT_URL` when the checkout is
-missing, but private plugin repositories should be prepared locally before a
-run.
+Opik tracing code is linked as a Git submodule at
+`third_party/sii-opik-plugin`, pinned to tag `v0.1.0`.

@@ -12,3 +12,22 @@ terminal_bench_tui_tasks.txt
 
 Use `harbor_tasks.txt` through `Agents/utils/common/Harbor/start.sh` by setting
 `DATASET_NAME=seta` and `DATASET_PATH` in `Agents/utils/common/Harbor/env.sh`.
+
+Optional online analysis:
+
+```bash
+DATASET_NAME=seta
+HARBOR_ONLINE_ANALYSIS=1
+```
+
+With `DATASET_NAME=seta`, online analysis tails Harbor `jobs/**/job.log`
+files and reports deterministic Harbor environment signals.
+
+Outputs:
+
+```text
+${OUTPUT_PATH}/online-analysis/environment-events.jsonl
+${OUTPUT_PATH}/online-analysis/environment-summary.json
+${RUNTIME_DIR}/online-rule-analyzer.log
+${RUNTIME_DIR}/online-rule-analyzer.pid
+```

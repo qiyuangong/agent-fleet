@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tail Harbor task consoles and report deterministic task-status signals."""
+"""Tail Harbor task logs and report deterministic task-status signals."""
 
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ from typing import Any
 
 STRUCTURED_PREFIX = "[ONLINE_ENV] "
 CONSOLE_RE = re.compile(r"^(?P<task_id>\d+)-(?P<task_name>.+)\.console\.log$")
+JOB_LOG_RE = re.compile(r"^jobs/[^/]+/worker-[^/]+/(?P<task_id>\d+)-(?P<task_name>[^/]+)/.+/job\.log$")
 ANSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 TASK_BLOCKING_ALLOWLIST = {
     ("preflight", "host_prerequisite", "command_unavailable"),
@@ -27,6 +28,18 @@ RAW_RULES = (
     (re.compile(r"Docker Hub preflight failed|cannot reach https://(?:auth|registry-1)\.docker\.io", re.I), "harbor_console_compat", "docker-registry-preflight-degraded", "docker_registry", "warning"),
     (re.compile(r"NonZeroAgentExitCodeError"), "agent_runtime", "agent-process-exit-abnormal", "agent", "warning"),
     (re.compile(r"AgentTimeoutError"), "agent_runtime", "agent-timeout", "agent", "warning"),
+)
+SETA_JOB_LOG_RULES = (
+    (re.compile(r"E: Could not open lock file /var/lib/apt/lists/lock - open \(13: Permission denied\)", re.I), "agent_setup", "apt", "apt-lock-permission-denied"),
+    (re.compile(r"E: Unable to lock directory /var/lib/apt/lists/", re.I), "agent_setup", "apt", "apt-lock-directory-denied"),
+    (re.compile(r"The following packages have unmet dependencies", re.I), "agent_setup", "apt", "apt-unmet-dependencies"),
+    (re.compile(r"Unable to correct problems, you have held broken packages", re.I), "agent_setup", "apt", "apt-held-broken-packages"),
+    (re.compile(r"curl\s*:\s*Depends:\s*libcurl4t64", re.I), "agent_setup", "apt", "apt-curl-libcurl-mismatch"),
+    (re.compile(r"E: Unable to locate package (?:nodejs|npm|curl)\b", re.I), "agent_setup", "apt", "apt-setup-package-unavailable"),
+    (re.compile(r"Docker compose command failed for environment\b", re.I), "environment_build", "docker", "docker-compose-env-failed"),
+    (re.compile(r"failed to solve: process .+ did not complete successfully", re.I), "environment_build", "docker", "docker-build-step-failed"),
+    (re.compile(r"Error response from daemon: invalid reference format", re.I), "environment_setup", "docker", "docker-daemon-invalid-reference"),
+    (re.compile(r"no space left on device", re.I), "environment_setup", "storage", "storage-no-space-left"),
 )
 IGNORED_RAW = (re.compile(r"No module named ['\"]botocore['\"]", re.I),)
 
@@ -65,6 +78,7 @@ class Analyzer:
         self.partial_idle_seconds = max(2.0, args.poll_interval * 2)
         self.events: list[Event] = []
         self.seen_raw: set[tuple[int, str]] = set()
+        self.profile = getattr(args, "profile", "harbor")
 
     def consoles(self) -> list[tuple[Path, int, str]]:
         found = []
@@ -73,6 +87,19 @@ class Analyzer:
             if match:
                 found.append((path, int(match.group("task_id")), match.group("task_name")))
         return found
+
+    def job_logs(self) -> list[tuple[Path, int, str]]:
+        found = []
+        for path in sorted(self.run_dir.glob("jobs/**/job.log")):
+            match = JOB_LOG_RE.match(path.relative_to(self.run_dir).as_posix())
+            if match:
+                found.append((path, int(match.group("task_id")), match.group("task_name")))
+        return found
+
+    def sources(self) -> list[tuple[Path, int, str]]:
+        if self.profile == "seta":
+            return self.job_logs()
+        return self.consoles()
 
     def emit(self, event: Event) -> None:
         self.events.append(event)
@@ -104,13 +131,19 @@ class Analyzer:
             return
         if any(pattern.search(line) for pattern in IGNORED_RAW):
             return
+        if self.profile == "seta":
+            for pattern, phase, component, event_name in SETA_JOB_LOG_RULES:
+                if pattern.search(line) and (task_id, event_name) not in self.seen_raw:
+                    self.seen_raw.add((task_id, event_name))
+                    self.emit(Event(utc_now(), task_id, task_name, str(path), "harbor", phase, component, event_name, "critical", True, True, line[:1000], False))
+            return
         for pattern, layer, event_name, component, severity in RAW_RULES:
             if pattern.search(line) and (task_id, event_name) not in self.seen_raw:
                 self.seen_raw.add((task_id, event_name))
                 self.emit(Event(utc_now(), task_id, task_name, str(path), layer, "unknown", component, event_name, severity, False, False, line[:1000], False))
 
     def scan_once(self) -> None:
-        for path, task_id, task_name in self.consoles():
+        for path, task_id, task_name in self.sources():
             offset = self.offsets.get(path, 0)
             try:
                 if path.stat().st_size < offset:
@@ -139,7 +172,7 @@ class Analyzer:
 
     def flush_partials(self, force: bool = False) -> None:
         now = time.monotonic()
-        for path, task_id, task_name in self.consoles():
+        for path, task_id, task_name in self.sources():
             line = self.partials.get(path, "")
             if not line or (not force and now - self.partial_updated_at[path] < self.partial_idle_seconds):
                 continue
@@ -156,14 +189,17 @@ class Analyzer:
         monitor_environment_events = Counter(
             f"{event.component}.{event.event}"
             for event in self.events
-            if event.structured
+            if event.structured or (self.profile == "seta" and event.task_blocking)
         )
+        input_policy = "jobs/**/job.log only" if self.profile == "seta" else "top-level *.console.log only"
         summary = {
             "schema": 1,
             "generated_at": utc_now(),
             "run_dir": str(self.run_dir),
-            "input_policy": "top-level *.console.log only",
+            "input_policy": input_policy,
             "mode": "follow" if self.args.follow else "replay",
+            "profile": self.profile,
+            "source_files_scanned": len(self.sources()),
             "console_files_scanned": len(self.consoles()),
             "event_count": len(self.events),
             "task_blocking_event_count": sum(event.task_blocking for event in self.events),
@@ -190,6 +226,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", type=Path)
     parser.add_argument("--follow", action="store_true")
     parser.add_argument("--poll-interval", type=float, default=1.0)
+    parser.add_argument("--profile", choices=("harbor", "seta", "smith", "terminalbench21", "sweverify"), default="harbor")
     args = parser.parse_args()
     if args.poll_interval <= 0:
         parser.error("--poll-interval must be positive")

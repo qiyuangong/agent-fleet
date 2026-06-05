@@ -38,9 +38,12 @@ harbor_start_online_analysis_if_enabled() {
   fi
 
   mkdir -p "$HARBOR_ONLINE_ANALYSIS_DIR" "$RUNTIME_DIR"
+  local online_analysis_profile
+  online_analysis_profile="$(harbor_dataset_kind)"
   nohup python3 "$SCRIPT_DIR/scripts/online_rule_analyzer.py" \
     "$OUTPUT_PATH" \
     --follow \
+    --profile "$online_analysis_profile" \
     --poll-interval "$HARBOR_ONLINE_ANALYSIS_POLL_INTERVAL" \
     --output-dir "$HARBOR_ONLINE_ANALYSIS_DIR" \
     >>"$HARBOR_ONLINE_ANALYSIS_LOG_FILE" 2>&1 &

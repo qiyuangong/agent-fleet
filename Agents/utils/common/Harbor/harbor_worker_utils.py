@@ -182,6 +182,27 @@ def prepare_claude_timeout_backup(logs_dir: Path, project_name: str) -> int:
     return 0
 
 
+def online_early_stop_reason(events_path: Path, task_id: int) -> str | None:
+    try:
+        handle = events_path.open("r", encoding="utf-8")
+    except FileNotFoundError:
+        return None
+
+    with handle:
+        for line in handle:
+            try:
+                event = json.loads(line)
+            except Exception:
+                continue
+            if not isinstance(event, dict):
+                continue
+            if event.get("task_id") != task_id or event.get("task_blocking") is not True:
+                continue
+            name = str(event.get("event") or "task-blocking")
+            return f"OnlineAnalysisEarlyStop:{name}"
+    return None
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -192,10 +213,12 @@ def main() -> int:
             "stream-claude-log",
             "stream-opencode-log",
             "prepare-claude-timeout-backup",
+            "online-early-stop-reason",
         ),
     )
     parser.add_argument("path")
     parser.add_argument("--project-name", default="")
+    parser.add_argument("--task-id", type=int)
     args = parser.parse_args()
     path = Path(args.path)
 
@@ -207,6 +230,14 @@ def main() -> int:
         return prepare_claude_timeout_backup(path, args.project_name)
     if args.command == "stream-opencode-log":
         return stream_opencode_log(path)
+    if args.command == "online-early-stop-reason":
+        if args.task_id is None:
+            parser.error("--task-id is required for online-early-stop-reason")
+        reason = online_early_stop_reason(path, args.task_id)
+        if reason is None:
+            return 1
+        print(reason)
+        return 0
     return stream_claude_log(path)
 
 

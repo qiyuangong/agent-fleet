@@ -83,6 +83,7 @@ Typical dataset paths:
 | `TB_AGENT_TIMEOUT_MULTIPLIER` | Agent execution timeout override |
 | `TB_AGENT_SETUP_TIMEOUT_MULTIPLIER` | Agent setup timeout multiplier |
 | `HARBOR_ONLINE_ANALYSIS` | Enables console-only online analysis, default `0` |
+| `HARBOR_EARLY_STOP` | Stops the current SETA task on matching task-blocking online-analysis events when set to `1`, default `0` |
 
 ## Agent Variables
 
@@ -139,19 +140,30 @@ OpenCode:
 
 ## Optional Harbor Monitor Diagnostics
 
-When `HARBOR_ONLINE_ANALYSIS=1`, `start.sh` launches a tailer that reads only:
+When `HARBOR_ONLINE_ANALYSIS=1`, `start.sh` launches a tailer. For most
+datasets it reads:
 
 ```text
 <OUTPUT_PATH>/<task-id>-<task-name>.console.log
 ```
 
+For `DATASET_NAME=seta`, it reads Harbor job logs instead:
+
+```text
+<OUTPUT_PATH>/jobs/**/job.log
+```
+
 `harboropik.sh` emits `[ONLINE_ENV]` JSON lines after deterministic setup
 checks fail. The analyzer marks allowlisted fatal events as task-blocking and
-reports raw text matches without changing task execution. Opik observability
-failures are excluded because they do not determine task execution status.
-The existing Harbor monitor displays aggregated structured environment signals
-next to its exception statistics. Agent exceptions remain in the existing
-exception statistics section to avoid duplicate reporting.
+reports raw text matches. By default this is report-only. For SETA only,
+`HARBOR_EARLY_STOP=1` makes each worker stop its current task when the
+online-analysis events file contains a matching `task_blocking=true` event for
+that task. `RESET_RUN=1` clears the online-analysis state before restarting the
+tailer so old task-blocking events are not reused. Opik observability failures
+are excluded because they do not determine task execution status. The existing
+Harbor monitor displays aggregated structured environment signals next to its
+exception statistics. Agent exceptions remain in the existing exception
+statistics section to avoid duplicate reporting.
 
 Outputs:
 

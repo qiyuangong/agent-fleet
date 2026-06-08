@@ -23,6 +23,17 @@ HARBOR_ONLINE_ANALYSIS=1
 With `DATASET_NAME=seta`, online analysis tails Harbor `jobs/**/job.log`
 files and reports deterministic Harbor environment signals.
 
+Optional early stop for task-blocking SETA signals:
+
+```bash
+DATASET_NAME=seta
+HARBOR_ONLINE_ANALYSIS=1
+HARBOR_EARLY_STOP=1
+```
+
+When enabled, a worker stops its current task if online analysis reports a
+matching `task_blocking=true` SETA event for that task.
+
 Outputs:
 
 ```text

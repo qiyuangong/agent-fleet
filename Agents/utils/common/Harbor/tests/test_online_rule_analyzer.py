@@ -119,7 +119,7 @@ class OnlineRuleAnalyzerTest(unittest.TestCase):
                 analyzer.flush_partials()
 
             self.assertEqual(analyzer.events, [])
-            self.assertEqual(analyzer.partials[console], '[ONLINE_ENV] {"schema":1')
+            self.assertEqual(analyzer.partials[console.resolve()], '[ONLINE_ENV] {"schema":1')
 
     def test_seta_profile_reports_job_log_environment_signals(self) -> None:
         with tempfile.TemporaryDirectory() as root:

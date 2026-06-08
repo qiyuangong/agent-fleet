@@ -51,6 +51,27 @@ stream_opencode_log() {
   python3 "$SCRIPT_DIR/harbor_worker_utils.py" stream-opencode-log "$1"
 }
 
+seta_online_early_stop_enabled() {
+  [[ "$HARBOR_ONLINE_ANALYSIS" == "1" ]] \
+    && [[ "$HARBOR_EARLY_STOP" == "1" ]] \
+    && [[ "$(harbor_dataset_kind)" == "seta" ]]
+}
+
+online_early_stop_reason() {
+  python3 "$SCRIPT_DIR/harbor_worker_utils.py" online-early-stop-reason \
+    "$HARBOR_ONLINE_ANALYSIS_DIR/environment-events.jsonl" \
+    --task-id "$1"
+}
+
+terminate_task_process() {
+  local pid="$1"
+  pkill -TERM -P "$pid" >/dev/null 2>&1 || true
+  kill -TERM "$pid" >/dev/null 2>&1 || true
+  sleep 2
+  pkill -KILL -P "$pid" >/dev/null 2>&1 || true
+  kill -KILL "$pid" >/dev/null 2>&1 || true
+}
+
 find_trial_logs_dir() {
   local result_file="$1"
   local result_dir
@@ -117,6 +138,7 @@ finalize_timeout_trace() {
 run_claimed_task() {
   local task_name="$1"
   local task_jobs_root="$2"
+  local task_index="$3"
   (
     export HARBOR_ROOT MODEL AGENT API_KEY BASE_URL TRACE_TO_OPIK OPIK_URL OPIK_URL_OVERRIDE OPIK_PROJECT_NAME OPIK_API_KEY OPIK_WORKSPACE
     export TB_PATH="$DATASET_PATH"
@@ -139,6 +161,27 @@ run_claimed_task() {
       export TB_LOCAL_WHEEL_SERVER_URL TB_LOCAL_CLAUDE_TGZ_URL LOCAL_WHEEL_PORT
     fi
 
+    if seta_online_early_stop_enabled; then
+      local early_stop_reason_file="$task_jobs_root/online-early-stop.reason"
+      local reason task_pid
+      rm -f "$early_stop_reason_file"
+      bash "$SCRIPT_DIR/harboropik.sh" &
+      task_pid="$!"
+      while kill -0 "$task_pid" >/dev/null 2>&1; do
+        reason="$(online_early_stop_reason "$task_index" || true)"
+        if [[ -n "$reason" ]]; then
+          printf '%s\n' "$reason" > "$early_stop_reason_file"
+          echo "[ONLINE_EARLY_STOP] task ${task_index}: ${reason}" >&2
+          terminate_task_process "$task_pid"
+          wait "$task_pid" >/dev/null 2>&1 || true
+          return 130
+        fi
+        sleep "$HARBOR_ONLINE_ANALYSIS_POLL_INTERVAL"
+      done
+      wait "$task_pid"
+      return $?
+    fi
+
     bash "$SCRIPT_DIR/harboropik.sh"
   )
 }
@@ -155,8 +198,10 @@ while true; do
   task_safe="$(safe_name "$task_name")"
   task_jobs_root="$JOBS_ROOT/worker-${WORKER_ID}/${task_index}-${task_safe}"
   task_console_log="$OUTPUT_PATH/${task_index}-${task_safe}.console.log"
+  early_stop_reason_file="$task_jobs_root/online-early-stop.reason"
 
   mkdir -p "$task_jobs_root"
+  rm -f "$early_stop_reason_file"
   printf '%s\t%s\n' "$task_index" "$task_name" > "$CURRENT_FILE"
   log_msg "starting task ${task_index}: $task_name"
   # Dry-run does not create agent JSONL logs; starting the tailer there leaves
@@ -172,7 +217,7 @@ while true; do
   fi
 
   set +e
-  run_claimed_task "$task_name" "$task_jobs_root" 2>&1 | tee "$task_console_log"
+  run_claimed_task "$task_name" "$task_jobs_root" "$task_index" 2>&1 | tee "$task_console_log"
   rc=${PIPESTATUS[0]}
   set -e
   if [[ -n "${AGENT_TAIL_PID:-}" ]]; then
@@ -183,7 +228,14 @@ while true; do
   fi
 
   result_file="$(find_latest_trial_result "$task_jobs_root" || true)"
-  if [[ "${TB_DRY_RUN:-0}" == "1" ]]; then
+  early_stop_reason=""
+  if [[ -f "$early_stop_reason_file" ]]; then
+    early_stop_reason="$(cat "$early_stop_reason_file" 2>/dev/null || true)"
+  fi
+  if [[ -n "$early_stop_reason" ]]; then
+    printf '%s\t%s\t%s\t%s\n' "$task_index" "$task_name" "$rc" "$early_stop_reason" >> "$QUEUE_DIR/failed.txt"
+    log_msg "early-stopped task ${task_index}: ${task_name} (${early_stop_reason})"
+  elif [[ "${TB_DRY_RUN:-0}" == "1" ]]; then
     printf '%s\t%s\t%s\t%s\t%s\n' "$task_index" "$task_name" "dry-run" "" "$task_console_log" >> "$QUEUE_DIR/done.txt"
     log_msg "dry-run task ${task_index}: ${task_name} (exit=$rc)"
   elif [[ -n "${result_file:-}" ]] && summary="$(summarize_result "$result_file")"; then

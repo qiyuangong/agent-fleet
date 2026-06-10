@@ -36,7 +36,7 @@
 
 ## Not Fully Enforced by the Implementation
 
-These are important security controls from the internal security analysis in [sii-system/tasks#43](https://github.com/sii-system/tasks/issues/43), but they are not fully enforced by the generated files and runtime configuration in this implementation:
+These are important security controls that are not fully enforced by the generated files and runtime configuration in this implementation:
 
 | Risk area | Current status | Mitigation direction |
 |---|---|---|

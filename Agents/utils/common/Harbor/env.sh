@@ -3,6 +3,29 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
+
+# Load shared site configuration (committed template; see config.env).
+# Values set there take effect for all tools; anything left unset falls
+# through to the public-safe defaults below. config.local.env (git-ignored) is
+# sourced after and overrides it; keep real credentials there, not in config.env.
+# Caller-provided environment wins over both files so a one-off override like
+# BASE_URL=... ./run still applies: snapshot it now, re-apply after sourcing.
+__caller_env="$(export -p)"
+if [[ -f "$REPO_ROOT/config.env" ]]; then
+  set -a
+  # shellcheck source=/dev/null
+  . "$REPO_ROOT/config.env"
+  set +a
+fi
+if [[ -f "$REPO_ROOT/config.local.env" ]]; then
+  set -a
+  # shellcheck source=/dev/null
+  . "$REPO_ROOT/config.local.env"
+  set +a
+fi
+eval "$__caller_env"
+unset __caller_env
+
 AGENTS_DIR="${AGENTS_DIR:-$REPO_ROOT/Agents}"
 TASKS_DIR="${TASKS_DIR:-$REPO_ROOT/Tasks}"
 HARBOR_CLAUDE_CODE_DIR="${HARBOR_CLAUDE_CODE_DIR:-$AGENTS_DIR/Harbor-claude-code}"
@@ -52,6 +75,13 @@ HARBOR_EARLY_STOP="${HARBOR_EARLY_STOP:-0}"
 
 API_KEY="${API_KEY:-${ANTHROPIC_AUTH_TOKEN:-xxx}}"
 BASE_URL="${BASE_URL:-${ANTHROPIC_BASE_URL:-}}"
+# Normalize to a versionless API root: callers may supply a value already ending
+# in /v1, but the endpoints below append /v1 (or /v1/chat/completions), so strip
+# one trailing /v1 to avoid doubling it.
+if [[ -n "$BASE_URL" ]]; then
+  BASE_URL="${BASE_URL%/}"
+  BASE_URL="${BASE_URL%/v1}"
+fi
 TRACE_TO_OPIK="${TRACE_TO_OPIK:-true}"
 OPIK_URL="${OPIK_URL:-}"
 OPIK_URL_OVERRIDE="${OPIK_URL_OVERRIDE:-$OPIK_URL}"
@@ -166,9 +196,9 @@ TB_VERIFIER_UV_BIN_DIR_MOUNT_PATH="${TB_VERIFIER_UV_BIN_DIR_MOUNT_PATH:-/opt/tb-
 TB_TRACE_TO_OPIK="${TB_TRACE_TO_OPIK:-$TRACE_TO_OPIK}"
 TB_CC_OPIK_DEBUG="${TB_CC_OPIK_DEBUG:-$CC_OPIK_DEBUG}"
 TB_CC_OPIK_INSTALL_DEPS="${TB_CC_OPIK_INSTALL_DEPS:-true}"
-TB_PIP_INDEX_URL="${TB_PIP_INDEX_URL:-https://pypi.org/simple/}"
-TB_PIP_EXTRA_INDEX_URL="${TB_PIP_EXTRA_INDEX_URL:-}"
-TB_PIP_TRUSTED_HOST="${TB_PIP_TRUSTED_HOST:-}"
+TB_PIP_INDEX_URL="${TB_PIP_INDEX_URL:-${PIP_INDEX_URL:-https://pypi.org/simple/}}"
+TB_PIP_EXTRA_INDEX_URL="${TB_PIP_EXTRA_INDEX_URL:-${PIP_EXTRA_INDEX_URL:-}}"
+TB_PIP_TRUSTED_HOST="${TB_PIP_TRUSTED_HOST:-${PIP_TRUSTED_HOST:-}}"
 TB_UV_INDEX_URL="${TB_UV_INDEX_URL:-$TB_PIP_INDEX_URL}"
 TB_UV_DEFAULT_INDEX="${TB_UV_DEFAULT_INDEX:-$TB_UV_INDEX_URL}"
 TB_PIP_DEFAULT_TIMEOUT="${TB_PIP_DEFAULT_TIMEOUT:-120}"

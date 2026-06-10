@@ -79,6 +79,16 @@ class BuildOpenclawConfigTests(unittest.TestCase):
         self.assertEqual(result["plugins"]["allow"], ["openai"])
         self.assertNotIn("entries", result["plugins"])
 
+    def test_base_url_root_gets_v1_suffix(self):
+        cfg = _base_cfg(BASE_URL="https://api.example.com")
+        result = setup.build_openclaw_config(self.template, cfg, token="t0", gw_port=18789)
+        provider = result["models"]["providers"]["default"]
+        self.assertEqual(provider["baseUrl"], "https://api.example.com/v1")
+
+    def test_base_url_v1_is_idempotent(self):
+        for given in ("https://api.example.com/v1", "https://api.example.com/v1/"):
+            self.assertEqual(setup.normalize_base_url(given), "https://api.example.com/v1")
+
     def test_template_unchanged(self):
         snapshot = json.dumps(self.template, sort_keys=True)
         cfg = _base_cfg()

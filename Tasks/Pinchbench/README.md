@@ -112,7 +112,7 @@ API_KEY="$PROVIDER_API_KEY" ./Tasks/Pinchbench/scripts/run-parallel-workers.py \
 
 Use this example when the OpenClaw gateways should call a local OpenAI-compatible endpoint such as vLLM or SGLang.
 
-> **Important:** For locally deployed OpenAI-compatible APIs, `BASE_URL` must include the `/v1` path suffix (e.g., `http://host.docker.internal:8000/v1`, not `http://host.docker.internal:8000`). Omitting it causes OpenClaw to return empty responses.
+> **Note:** `BASE_URL` is the API root; the runner appends `/v1` automatically (e.g. `http://host.docker.internal:8000` becomes `http://host.docker.internal:8000/v1`). A URL that already ends in `/v1` is accepted unchanged.
 
 ```bash
 BASE_URL="http://host.docker.internal:8000/v1" \
@@ -170,9 +170,9 @@ Without these mounts and the gateway token, the worker would run against differe
 
 ## Configuration
 
-The runner reads defaults from [`config/pinchbench.env`](./config/pinchbench.env) and reuses `Agents/Openclaw/config/fleet.env` for fleet-wide values (`COUNT`, `CONFIG_BASE`, `WORKSPACE_BASE`). Environment variables override both files. Relative paths in `pinchbench.env` are resolved from the repository root.
+The runner reads defaults from [`config/pinchbench.env`](./config/pinchbench.env), shared infrastructure (`BASE_URL`, `API_KEY`, `MODEL_ID`, package mirrors) from the repo-root `config.env` (with private overrides/secrets in the git-ignored `config.local.env`), and fleet-wide values (`COUNT`, `CONFIG_BASE`, `WORKSPACE_BASE`) from `Agents/Openclaw/config/fleet.env`. Environment variables override all of these. Relative paths in `pinchbench.env` are resolved from the repository root.
 
-`MODEL_ID` is required unless already set in `Agents/Openclaw/config/fleet.env`. `PINCHBENCH_MODEL_PROVIDER` is required only when the fleet uses a local OpenAI-compatible backend and auto-detection is insufficient (typical values: `vllm`, `sglang`, `openai-compatible`). Everything else is optional.
+`MODEL_ID` is required unless already set in `config.env`. `PINCHBENCH_MODEL_PROVIDER` is required only when the fleet uses a local OpenAI-compatible backend and auto-detection is insufficient (typical values: `vllm`, `sglang`, `openai-compatible`). Everything else is optional.
 
 | Variable | Default | Description |
 |---|---|---|

@@ -136,7 +136,7 @@ DOCKER_COMPOSE_READ_ONLY=false \
 ./Agents/Openclaw/scripts/setup.sh 4
 ```
 
-> **Required:** `BASE_URL` and `API_KEY` must be set via `Agents/Openclaw/config/fleet.env`, environment variables, or CLI. See [Configuration Reference](#configuration-reference) for all options.
+> **Required:** `BASE_URL` and `API_KEY` must be set via the repo-root `config.env`, environment variables, or CLI. See [Configuration Reference](#configuration-reference) for all options.
 
 ### Step 2: Patch Plugin Config
 
@@ -189,7 +189,7 @@ COUNT=20 ITERATIONS=3 ./Tasks/clawBio/scripts/run-openclaw-clawbio.sh
 
 ### Unified Launcher Notes
 
-`run-openclaw-clawbio.sh` is a thin orchestrator that prewarms the cache, generates and patches fleet configs, starts the fleet, and invokes `run-benchmark.py`. Run with `-h` to see all environment variables. Variable precedence: runtime env → `Agents/Openclaw/config/fleet.env` → script defaults.
+`run-openclaw-clawbio.sh` is a thin orchestrator that prewarms the cache, generates and patches fleet configs, starts the fleet, and invokes `run-benchmark.py`. Run with `-h` to see all environment variables. Variable precedence: runtime env → `Agents/Openclaw/config/fleet.env` → `config.env` → script defaults.
 
 Output layout is described under [Output Structure](#output-structure).
 

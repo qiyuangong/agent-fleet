@@ -17,7 +17,26 @@ using Opik-enabled agents:
 git submodule update --init --recursive
 ```
 
-Edit the Harbor environment file:
+Point the fleet at your infrastructure. `config.env` is a committed template;
+copy it to a git-ignored `config.local.env` (sourced after, and overriding,
+`config.env`) and put your real values — including credentials — there:
+
+```bash
+cp config.env config.local.env
+vim config.local.env
+```
+
+Set your model gateway, Opik endpoint, and package mirrors there:
+
+```bash
+BASE_URL=https://your-openai-compatible-endpoint
+API_KEY=your-api-key
+MODEL=your-model-id
+OPIK_URL=http://your-opik-host/api
+OPIK_PROJECT_NAME=your-project-name
+```
+
+Then choose the run parameters in the Harbor environment file:
 
 ```bash
 cd Agents/utils/common/Harbor
@@ -32,13 +51,6 @@ DATASET_NAME="seta"        # seta, smith, terminalbench21, or sweverify
 DATASET_PATH="/workspace/seta-env/Harbor-Dataset"
 TOTAL_WORKERS="80"
 TB_N_CONCURRENT="80"
-
-MODEL="minimax2.7"
-BASE_URL="https://your-openai-compatible-endpoint"
-API_KEY="your-api-key"
-
-OPIK_URL="http://your-opik-host/api"
-OPIK_PROJECT_NAME="your-project-name"
 ```
 
 Start the run:

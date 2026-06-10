@@ -4,16 +4,19 @@ Operator-facing reference: configuration, fleet commands, multi-node deployment,
 
 ## Configuration
 
-`setup.sh` reads configuration from multiple sources (later overrides earlier):
+`setup.sh` reads configuration from multiple sources (highest precedence first):
 
-1. Environment variables set by the caller
-2. `Agents/Openclaw/config/fleet.env` — config file (sourced after caller env, so matching keys win)
-3. Command-line flags and positional `COUNT`
+1. Command-line flags and positional `COUNT`
+2. Environment variables set by the caller
+3. `Agents/Openclaw/config/fleet.env` — OpenClaw config
+4. `config.local.env` — private overrides/secrets
+5. `config.env` — shared site configuration (model gateway, Opik, mirrors)
 
-Edit `Agents/Openclaw/config/fleet.env` to get started:
+Set your model gateway in the repo-root `config.env`, then edit `Agents/Openclaw/config/fleet.env` for fleet-specific options:
 
 ```bash
-# Edit Agents/Openclaw/config/fleet.env with your BASE_URL, API_KEY, MODEL_ID, COUNT
+# Set BASE_URL, API_KEY, MODEL_ID in config.env
+# Set COUNT and other OpenClaw options in Agents/Openclaw/config/fleet.env
 ./Agents/Openclaw/scripts/setup.sh
 ```
 

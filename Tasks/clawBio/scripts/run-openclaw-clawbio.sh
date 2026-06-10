@@ -17,7 +17,7 @@ ITERATIONS="${ITERATIONS:-1}"
 RUN_ROOT="${RUN_ROOT:-$BENCH_DIR/runs/$TIMESTAMP}"
 TASK_CONFIG="${TASK_CONFIG:-$BENCH_DIR/config/tasks.json}"
 
-# Keep model/provider config sourced from fleet env or caller env.
+# Keep model/provider config sourced from config.env or caller env.
 BASE_URL="${BASE_URL:-}"
 API_KEY="${API_KEY:-}"
 MODEL_ID="${MODEL_ID:-}"
@@ -55,7 +55,7 @@ Optional env vars:
   OPENCLAW_IMAGE_POLICY=if-missing|always
   CONFIG_BASE, WORKSPACE_BASE, PLUGIN_CACHE_DIR
 
-Provider/fleet vars are read from environment or Agents/Openclaw/config/fleet.env:
+Provider/fleet vars are read from environment or the repo-root config.env:
   BASE_URL, API_KEY, MODEL_ID
 EOF
 }
@@ -65,8 +65,26 @@ if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   exit 0
 fi
 
-# Load fleet defaults early so launcher-side validation can see values
-# configured in Agents/Openclaw/config/fleet.env.
+# Load shared site config (config.env), then private overrides/secrets
+# (config.local.env, git-ignored), then OpenClaw fleet defaults, so
+# launcher-side validation can see values from any of them. fleet.env overrides
+# config.local.env, which overrides config.env; caller-provided env wins over
+# all of them, so snapshot it now and re-apply after sourcing.
+__caller_env="$(export -p)"
+root_cfg="$REPO_ROOT/config.env"
+if [[ -f "$root_cfg" ]]; then
+  set -a
+  # shellcheck source=/dev/null
+  . "$root_cfg"
+  set +a
+fi
+local_cfg="$REPO_ROOT/config.local.env"
+if [[ -f "$local_cfg" ]]; then
+  set -a
+  # shellcheck source=/dev/null
+  . "$local_cfg"
+  set +a
+fi
 fleet_env="$OPENCLAW_DIR/config/fleet.env"
 if [[ -f "$fleet_env" ]]; then
   set -a
@@ -74,6 +92,9 @@ if [[ -f "$fleet_env" ]]; then
   . "$fleet_env"
   set +a
 fi
+# Caller-provided env wins over all the config files above.
+eval "$__caller_env"
+unset __caller_env
 
 if [[ "$OPIK_PLUGIN" == "enabled" ]]; then
   if [[ -z "$OPIK_URL" ]]; then

@@ -3,14 +3,16 @@
 
 Usage: ./scripts/setup.py [COUNT] [options]   (default: 2)
 
-Configuration is read from (later overrides earlier):
-  1. Environment variables already set by the caller
-  2. config/fleet.env           (loaded by the setup.sh wrapper after caller env, so matching keys win)
-  3. Command-line flags and positional COUNT
+Configuration precedence (highest first):
+  1. Command-line flags and positional COUNT
+  2. Environment variables already set by the caller
+  3. config/fleet.env
+  4. config.local.env
+  5. config.env
 
 This script replaces the previous Bash + jq/sed implementation. The Bash wrapper
-(setup.sh) only exports config/fleet.env and execs into this module so existing
-callers and tests keep working unchanged.
+(setup.sh) loads env files, re-applies caller env, and execs into this module so
+existing callers and tests keep working unchanged.
 """
 
 from __future__ import annotations
@@ -25,6 +27,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -146,9 +149,9 @@ def validate_required(cfg: dict[str, Any]) -> None:
         msg = (
             "Error: model provider is not configured.\n\n"
             "Set both BASE_URL and API_KEY before running setup.sh.\n\n"
-            f"Option 1: edit {PROJECT_DIR}/config/fleet.env and set BASE_URL, API_KEY, "
-            "MODEL_ID, COUNT\n"
-            f'Option 2: BASE_URL="https://api.example.com/v1" API_KEY="sk-xxx" '
+            f"Option 1: set BASE_URL, API_KEY, MODEL_ID in {PROJECT_DIR.parent.parent}/config.env "
+            f"(COUNT in {PROJECT_DIR}/config/fleet.env)\n"
+            f'Option 2: BASE_URL="https://api.example.com" API_KEY="sk-xxx" '
             f'MODEL_ID="{cfg["MODEL_ID"]}" {SCRIPT_DIR}/setup.sh {cfg["COUNT"]}'
         )
         raise _ParserError(msg)
@@ -167,6 +170,22 @@ def validate_required(cfg: dict[str, Any]) -> None:
 
 # ── openclaw.json rendering ───────────────────────────────────────────────────
 
+def normalize_base_url(url: str) -> str:
+    """Return the OpenAI-compatible base URL with a single ``/v1`` path suffix.
+
+    config.env documents BASE_URL as the API root (no version suffix) so one
+    shared value works across runners; Harbor appends ``/v1`` itself, and
+    OpenClaw's provider needs the ``/v1`` endpoint. Idempotent: a path already
+    ending in ``/v1`` is left unchanged. Any query/fragment is preserved."""
+    if not url:
+        return url
+    parts = urlsplit(url)
+    path = parts.path.rstrip("/")
+    if not path.endswith("/v1"):
+        path = f"{path}/v1"
+    return urlunsplit((parts.scheme, parts.netloc, path, parts.query, parts.fragment))
+
+
 def build_openclaw_config(template: dict[str, Any], cfg: dict[str, Any], *, token: str,
                            gw_port: int) -> dict[str, Any]:
     """Apply per-instance edits to the template config. Pure function."""
@@ -181,7 +200,7 @@ def build_openclaw_config(template: dict[str, Any], cfg: dict[str, Any], *, toke
     }
 
     provider = result["models"]["providers"]["default"]
-    provider["baseUrl"] = cfg["BASE_URL"]
+    provider["baseUrl"] = normalize_base_url(cfg["BASE_URL"])
     provider["apiKey"] = cfg["API_KEY"]
     provider["models"][0]["id"] = cfg["MODEL_ID"]
     provider["models"][0]["name"] = cfg["MODEL_ID"]

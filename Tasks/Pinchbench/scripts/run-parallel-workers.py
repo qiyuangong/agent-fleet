@@ -12,6 +12,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Callable
+from urllib.parse import urlsplit, urlunsplit
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 BENCH_DIR = SCRIPT_DIR.parent
@@ -20,6 +21,8 @@ OPENCLAW_DIR = REPO_ROOT / "Agents" / "Openclaw"
 CONFIG_DIR = BENCH_DIR / "config"
 ENV_FILE = OPENCLAW_DIR / ".env"
 FLEET_ENV_FILE = OPENCLAW_DIR / "config" / "fleet.env"
+CONFIG_ENV_FILE = REPO_ROOT / "config.env"
+CONFIG_LOCAL_ENV_FILE = REPO_ROOT / "config.local.env"
 PINCHBENCH_ENV_FILE = CONFIG_DIR / "pinchbench.env"
 DEFAULT_PINCHBENCH_REF = "f3f1cb560c252541cef6a106c05ba4f2e8068be0"
 OPENCLAW_CONTAINER_STATE_DIR = "/home/node/openclaw-state"
@@ -78,13 +81,42 @@ def positive_int(value: str) -> int:
     return parsed
 
 
+def normalize_base_url(url: str) -> str:
+    """Return the OpenAI-compatible base URL with a single ``/v1`` path suffix.
+
+    config.env documents BASE_URL as the API root (no version suffix); the
+    PinchBench agent uses an OpenAI client that needs the ``/v1`` endpoint.
+    Idempotent: a path already ending in ``/v1`` is left unchanged. Any
+    query/fragment is preserved."""
+    if not url:
+        return url
+    parts = urlsplit(url)
+    path = parts.path.rstrip("/")
+    if not path.endswith("/v1"):
+        path = f"{path}/v1"
+    return urlunsplit((parts.scheme, parts.netloc, path, parts.query, parts.fragment))
+
+
 def load_runner_config() -> dict[str, str]:
+    config_env = load_env_file(CONFIG_ENV_FILE)
+    config_local_env = load_env_file(CONFIG_LOCAL_ENV_FILE)
     fleet_env = load_env_file(FLEET_ENV_FILE)
     generated_env = load_env_file(ENV_FILE)
     runner_env = load_env_file(PINCHBENCH_ENV_FILE)
+
+    def shared(key: str, default: str = "") -> str:
+        # Shared infra lives in config.env (base layer); config.local.env holds
+        # private overrides/secrets and wins over it; fleet.env overrides both.
+        for source in (fleet_env, config_local_env, config_env):
+            if key in source:
+                return source[key]
+        return default
+
     config = {
         "COUNT": fleet_env.get("COUNT", "4"),
-        "MODEL_ID": fleet_env.get("MODEL_ID", ""),
+        "MODEL_ID": shared("MODEL_ID"),
+        "BASE_URL": shared("BASE_URL"),
+        "API_KEY": shared("API_KEY"),
         "PINCHBENCH_MODEL_PROVIDER": "auto",
         "PINCHBENCH_TIMEOUT_MULTIPLIER": "1.0",
         "JUDGE_MODEL_ID": "",
@@ -104,10 +136,10 @@ def load_runner_config() -> dict[str, str]:
             fleet_env.get("CONTAINER_NAME_PREFIX", ""),
         ),
         "OPENCLAW_CONTAINER_USER": "node",
-        "NPM_CONFIG_REGISTRY": fleet_env.get("NPM_CONFIG_REGISTRY", ""),
-        "PIP_INDEX_URL": fleet_env.get("PIP_INDEX_URL", ""),
-        "PIP_EXTRA_INDEX_URL": fleet_env.get("PIP_EXTRA_INDEX_URL", ""),
-        "PIP_TRUSTED_HOST": fleet_env.get("PIP_TRUSTED_HOST", ""),
+        "NPM_CONFIG_REGISTRY": shared("NPM_CONFIG_REGISTRY"),
+        "PIP_INDEX_URL": shared("PIP_INDEX_URL"),
+        "PIP_EXTRA_INDEX_URL": shared("PIP_EXTRA_INDEX_URL"),
+        "PIP_TRUSTED_HOST": shared("PIP_TRUSTED_HOST"),
     }
     config.update(runner_env)
     for key in config:
@@ -938,8 +970,10 @@ def main() -> None:
         count = len([t for t in suite_chunk.split(",") if t]) if suite_chunk else 0
         print(f"  worker {i}: {count} task(s)")
 
-    api_key = os.environ.get("API_KEY", "")
-    base_url = os.environ.get("BASE_URL", "")
+    # BASE_URL/API_KEY come from the shared config (config.env / config.local.env
+    # / fleet.env), with os.environ already applied as the override layer above.
+    api_key = config["API_KEY"]
+    base_url = normalize_base_url(config["BASE_URL"])
     openai_api_key = api_key
     openrouter_key = os.environ.get("OPENROUTER_API_KEY", openai_api_key)
     model = config["MODEL_ID"]

@@ -176,6 +176,18 @@ class BenchmarkCommandTests(unittest.TestCase):
         self.assertIn("--base-url https://example.invalid/v1", command)
         self.assertIn("--api-key secret-key", command)
 
+    def test_normalize_base_url_appends_v1_to_root(self):
+        self.assertEqual(
+            self.runner.normalize_base_url("https://example.invalid"),
+            "https://example.invalid/v1",
+        )
+
+    def test_normalize_base_url_is_idempotent(self):
+        for given in ("https://example.invalid/v1", "https://example.invalid/v1/"):
+            self.assertEqual(
+                self.runner.normalize_base_url(given), "https://example.invalid/v1"
+            )
+
     def test_worker_container_exports_openai_api_key(self):
         docker_cmd = self.runner.build_worker_docker_command(
             image="pinchbench-runner:local",

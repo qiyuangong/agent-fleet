@@ -20,6 +20,7 @@ REPO_ROOT="$(cd "$PROJECT_DIR/../.." && pwd)"
 OPENCLAW_REPO="${OPENCLAW_REPO:-https://github.com/openclaw/openclaw.git}"
 
 OPENCLAW_CACHE="$PROJECT_DIR/cache/openclaw"
+OPENCLAW_SESSION_AFFINITY_PATCH="$PROJECT_DIR/patches/openclaw/openclaw-session-affinity.patch"
 TRACE_PLUGIN_SOURCE_DIR="${TRACE_PLUGIN_SOURCE_DIR:-$REPO_ROOT/third_party/sii-opik-plugin}"
 PLUGIN_SRC="$TRACE_PLUGIN_SOURCE_DIR/harness/openclaw"
 
@@ -92,8 +93,13 @@ fi
 
 echo "Checking out pinned openclaw ref: $OPENCLAW_PINNED_REF"
 git -C "$OPENCLAW_CACHE" checkout "$OPENCLAW_PINNED_REF"
+git -C "$OPENCLAW_CACHE" reset --hard "$OPENCLAW_PINNED_REF"
 
 update_npmrc_mirror "$OPENCLAW_CACHE"
+if [ -f "$OPENCLAW_SESSION_AFFINITY_PATCH" ]; then
+  echo "Applying OpenClaw session affinity patch..."
+  git -C "$OPENCLAW_CACHE" apply --unidiff-zero "$OPENCLAW_SESSION_AFFINITY_PATCH"
+fi
 
 # ── Step 2: Build openclaw:local ──
 echo "Building openclaw:local..."

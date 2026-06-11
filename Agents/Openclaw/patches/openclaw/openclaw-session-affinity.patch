@@ -1,0 +1,218 @@
+diff --git a/extensions/openai/transport-policy.test.ts b/extensions/openai/transport-policy.test.ts
+index 89f9accc7f..095511134f 100644
+--- a/extensions/openai/transport-policy.test.ts
++++ b/extensions/openai/transport-policy.test.ts
+@@ -28,0 +29,6 @@ describe("openai transport policy", () => {
++  const customProviderModel = {
++    ...proxyModel,
++    provider: "default",
++    api: "openai-completions",
++  } satisfies ProviderRuntimeModel;
++
+@@ -42,0 +49 @@ describe("openai transport policy", () => {
++        "x-session-affinity": "session-123",
+@@ -69,0 +77,22 @@ describe("openai transport policy", () => {
++  it("builds turn state for custom OpenAI-compatible provider keys", () => {
++    expect(
++      resolveOpenAITransportTurnState({
++        provider: "default",
++        modelId: customProviderModel.id,
++        model: customProviderModel,
++        sessionId: "session-123",
++        turnId: "turn-123",
++        attempt: 1,
++        transport: "stream",
++      }),
++    ).toMatchObject({
++      headers: {
++        "x-client-request-id": "session-123",
++        "x-session-affinity": "session-123",
++        "x-openclaw-session-id": "session-123",
++        "x-openclaw-turn-id": "turn-123",
++        "x-openclaw-turn-attempt": "1",
++      },
++    });
++  });
++
+@@ -88,0 +118 @@ describe("openai transport policy", () => {
++        "x-session-affinity": "session-123",
+diff --git a/extensions/openai/transport-policy.ts b/extensions/openai/transport-policy.ts
+index cd69858ee7..0ade6c08fb 100644
+--- a/extensions/openai/transport-policy.ts
++++ b/extensions/openai/transport-policy.ts
+@@ -48,0 +49,29 @@ function usesKnownNativeOpenAIRoute(provider: string, baseUrl?: string): boolean
++function hasConfiguredHttpBaseUrl(baseUrl?: string): boolean {
++  const trimmed = baseUrl?.trim();
++  if (!trimmed) {
++    return false;
++  }
++  try {
++    const protocol = new URL(trimmed).protocol;
++    return protocol === "http:" || protocol === "https:";
++  } catch {
++    return false;
++  }
++}
++
++export function usesOpenAICompatibleHttpRoute(provider: string, baseUrl?: string): boolean {
++  if (usesKnownNativeOpenAIRoute(provider, baseUrl)) {
++    return true;
++  }
++  const normalizedProvider = normalizeProviderId(provider);
++  if (
++    !normalizedProvider ||
++    normalizedProvider === "openai" ||
++    normalizedProvider === OPENAI_CODEX_PROVIDER_ID ||
++    AZURE_PROVIDER_IDS.has(normalizedProvider)
++  ) {
++    return false;
++  }
++  return hasConfiguredHttpBaseUrl(baseUrl);
++}
++
+@@ -54 +83 @@ function resolveSessionHeaders(params: {
+-  if (!params.sessionId || !usesKnownNativeOpenAIRoute(params.provider, params.baseUrl)) {
++  if (!params.sessionId || !usesOpenAICompatibleHttpRoute(params.provider, params.baseUrl)) {
+@@ -80,0 +110 @@ export function resolveOpenAITransportTurnState(
++  const sessionId = sessionHeaders["x-openclaw-session-id"] ?? "";
+@@ -84,0 +115 @@ export function resolveOpenAITransportTurnState(
++      "x-session-affinity": sessionId,
+diff --git a/src/agents/openai-transport-stream.ts b/src/agents/openai-transport-stream.ts
+index 357305504b..6bed1455c4 100644
+--- a/src/agents/openai-transport-stream.ts
++++ b/src/agents/openai-transport-stream.ts
+@@ -28,0 +29 @@ import { resolveProviderTransportTurnStateWithPlugin } from "../plugins/provider
++import { resolveOpenAITransportTurnState } from "../../extensions/openai/transport-policy.js";
+@@ -697,0 +699,9 @@ function resolveProviderTransportTurnState(
++  const context = {
++    provider: model.provider,
++    modelId: model.id,
++    model: model as ProviderRuntimeModel,
++    sessionId: params.sessionId,
++    turnId: params.turnId,
++    attempt: params.attempt,
++    transport: params.transport,
++  };
+@@ -700,10 +710,2 @@ function resolveProviderTransportTurnState(
+-    context: {
+-      provider: model.provider,
+-      modelId: model.id,
+-      model: model as ProviderRuntimeModel,
+-      sessionId: params.sessionId,
+-      turnId: params.turnId,
+-      attempt: params.attempt,
+-      transport: params.transport,
+-    },
+-  });
++    context,
++  }) ?? resolveOpenAITransportTurnState(context);
+@@ -1220,0 +1223 @@ function createOpenAICompletionsClient(
++  turnHeaders?: Record<string, string>,
+@@ -1222 +1225,6 @@ function createOpenAICompletionsClient(
+-  const clientConfig = buildOpenAICompletionsClientConfig(model, context, optionHeaders);
++  const clientConfig = buildOpenAICompletionsClientConfig(
++    model,
++    context,
++    optionHeaders,
++    turnHeaders,
++  );
+@@ -1245,0 +1254 @@ function buildOpenAICompletionsClientConfig(
++  turnHeaders?: Record<string, string>,
+@@ -1251 +1260 @@ function buildOpenAICompletionsClientConfig(
+-  const headers = buildOpenAIClientHeaders(model, context, optionHeaders);
++  const headers = buildOpenAIClientHeaders(model, context, optionHeaders, turnHeaders);
+@@ -1314 +1323,13 @@ export function createOpenAICompletionsTransportStreamFn(): StreamFn {
+-        const client = createOpenAICompletionsClient(model, context, apiKey, options?.headers);
++        const turnState = resolveProviderTransportTurnState(model, {
++          sessionId: options?.sessionId,
++          turnId: randomUUID(),
++          attempt: 1,
++          transport: "stream",
++        });
++        const client = createOpenAICompletionsClient(
++          model,
++          context,
++          apiKey,
++          options?.headers,
++          turnState?.headers,
++        );
+diff --git a/src/agents/pi-embedded-runner/compact.ts b/src/agents/pi-embedded-runner/compact.ts
+index 2ed90892bd..4ef669330c 100644
+--- a/src/agents/pi-embedded-runner/compact.ts
++++ b/src/agents/pi-embedded-runner/compact.ts
+@@ -183,0 +184 @@ function prepareCompactionSessionAgent(params: {
++  sessionKey?: string;
+@@ -200,0 +202 @@ function prepareCompactionSessionAgent(params: {
++    sessionKey: params.sessionKey,
+@@ -1069,0 +1072 @@ async function compactEmbeddedPiSessionDirectOnce(
++            sessionKey: params.sessionKey,
+diff --git a/src/agents/pi-embedded-runner/run/attempt.ts b/src/agents/pi-embedded-runner/run/attempt.ts
+index 64c3d6d683..c8ca991429 100644
+--- a/src/agents/pi-embedded-runner/run/attempt.ts
++++ b/src/agents/pi-embedded-runner/run/attempt.ts
+@@ -1921,0 +1922 @@ export async function runEmbeddedAttempt(
++        sessionKey: params.sessionKey,
+diff --git a/src/agents/pi-embedded-runner/stream-resolution.test.ts b/src/agents/pi-embedded-runner/stream-resolution.test.ts
+index 5d77d9fbfc..f38a90b21e 100644
+--- a/src/agents/pi-embedded-runner/stream-resolution.test.ts
++++ b/src/agents/pi-embedded-runner/stream-resolution.test.ts
+@@ -202,0 +203,22 @@ describe("resolveEmbeddedAgentStreamFn", () => {
++  it("uses session keys as transport session ids for custom OpenAI-compatible HTTP providers", async () => {
++    const innerStreamFn = vi.fn(async (_model, _context, options) => options);
++    overrideBoundaryAwareStreamFnOnce(innerStreamFn as never);
++
++    const streamFn = resolveEmbeddedAgentStreamFn({
++      currentStreamFn: undefined,
++      sessionId: "run-session",
++      sessionKey: "stable-session",
++      model: {
++        api: "openai-completions",
++        provider: "default",
++        id: "proxy-model",
++        baseUrl: "https://proxy.example.com/v1",
++      } as never,
++    });
++
++    await expect(
++      streamFn({ provider: "default", id: "proxy-model" } as never, {} as never, {}),
++    ).resolves.toMatchObject({ sessionId: "stable-session" });
++    expect(innerStreamFn).toHaveBeenCalledTimes(1);
++  });
++
+diff --git a/src/agents/pi-embedded-runner/stream-resolution.ts b/src/agents/pi-embedded-runner/stream-resolution.ts
+index 56aa2df299..6aa98513ed 100644
+--- a/src/agents/pi-embedded-runner/stream-resolution.ts
++++ b/src/agents/pi-embedded-runner/stream-resolution.ts
+@@ -5,0 +6 @@ import { stripSystemPromptCacheBoundary } from "../system-prompt-cache-boundary.
++import { usesOpenAICompatibleHttpRoute } from "../../../extensions/openai/transport-policy.js";
+@@ -49,0 +51,20 @@ function isOpenAICodexResponsesModel(model: EmbeddedRunAttemptParams["model"]):
++function resolveOpenAITransportSessionId(params: {
++  model: EmbeddedRunAttemptParams["model"];
++  sessionId: string;
++  sessionKey?: string;
++}): string | undefined {
++  if (!usesOpenAICompatibleHttpRoute(params.model.provider, params.model.baseUrl)) {
++    return undefined;
++  }
++  const api = String(params.model.api).trim();
++  if (
++    api !== "openai-responses" &&
++    api !== "openai-codex-responses" &&
++    api !== "openai-completions" &&
++    api !== "azure-openai-responses"
++  ) {
++    return undefined;
++  }
++  return params.sessionKey?.trim() || params.sessionId;
++}
++
+@@ -112,0 +134 @@ export function resolveEmbeddedAgentStreamFn(params: {
++  sessionKey?: string;
+@@ -117,0 +140,5 @@ export function resolveEmbeddedAgentStreamFn(params: {
++  const openAITransportSessionId = resolveOpenAITransportSessionId({
++    model: params.model,
++    sessionId: params.sessionId,
++    sessionKey: params.sessionKey,
++  });
+@@ -179,0 +207 @@ export function resolveEmbeddedAgentStreamFn(params: {
++        sessionId: openAITransportSessionId,

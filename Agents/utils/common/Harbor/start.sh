@@ -40,7 +40,7 @@ harbor_start_online_analysis_if_enabled() {
   mkdir -p "$HARBOR_ONLINE_ANALYSIS_DIR" "$RUNTIME_DIR"
   local online_analysis_profile
   online_analysis_profile="$(harbor_dataset_kind)"
-  nohup python3 "$SCRIPT_DIR/scripts/online_rule_analyzer.py" \
+  nohup setsid python3 "$SCRIPT_DIR/scripts/online_rule_analyzer.py" \
     "$OUTPUT_PATH" \
     --follow \
     --profile "$online_analysis_profile" \

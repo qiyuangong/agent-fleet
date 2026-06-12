@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import time
 from collections import Counter
@@ -90,11 +91,15 @@ class Analyzer:
 
     def job_logs(self) -> list[tuple[Path, int, str]]:
         found = []
-        for path in sorted(self.run_dir.glob("jobs/**/job.log")):
+        jobs_dir = self.run_dir / "jobs"
+        for root, _, files in os.walk(jobs_dir, onerror=lambda _: None):
+            if "job.log" not in files:
+                continue
+            path = Path(root) / "job.log"
             match = JOB_LOG_RE.match(path.relative_to(self.run_dir).as_posix())
             if match:
                 found.append((path, int(match.group("task_id")), match.group("task_name")))
-        return found
+        return sorted(found)
 
     def sources(self) -> list[tuple[Path, int, str]]:
         if self.profile == "seta":

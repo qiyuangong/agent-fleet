@@ -14,12 +14,17 @@ dist/
 .env.*
 *.local.env
 Agents/Openclaw/.env
+Agents/Openclaw/docker-compose.yml
 
 # Runtime outputs and local caches
 runs/
 */runs/
 Agents/Openclaw/cache/
+Agents/Openclaw/.runtime/
+Tasks/Pinchbench/.pinchbench-results-docker/
+Tasks/Pinchbench/.uv-cache/
 Tasks/clawBio/cache/
+Tasks/clawBio/results/
 
 # Logs
 *.log
@@ -32,3 +37,6 @@ Tasks/clawBio/cache/
 
 # OS/editor noise
 .DS_Store
+
+# Local assistant artifacts
+.claude/

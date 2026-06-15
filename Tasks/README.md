@@ -4,14 +4,14 @@ Benchmarks, task lists, and automated task workflows.
 
 | Path | Role |
 | --- | --- |
-| `Pinchbench/` | PinchBench benchmark task runner for OpenClaw. |
-| `clawBio/` | ClawBio benchmark task runner for OpenClaw. |
-| `SWE-rebench-v2/` | SWE-Rebench-V2 Harbor Hub entrypoint. |
-| `SWE-verify/` | SWE-bench Verified task list for Harbor. |
-| `SWE-smith/` | SWE-Smith task list for Harbor. |
-| `Terminal-bench-2/` | Terminal-Bench task lists for Harbor. |
-| `SETA/` | SETA task lists. |
+| [`Pinchbench/`](./Pinchbench/) | PinchBench benchmark task runner for OpenClaw. |
+| [`clawBio/`](./clawBio/) | ClawBio benchmark task runner for OpenClaw. |
+| [`SWE-rebench-v2/`](./SWE-rebench-v2/) | SWE-rebench-v2 Harbor Hub entrypoint. |
+| [`SWE-verify/`](./SWE-verify/) | SWE-bench Verified task list for Harbor. |
+| [`SWE-smith/`](./SWE-smith/) | SWE-Smith task list for Harbor. |
+| [`Terminal-bench-2/`](./Terminal-bench-2/) | Terminal-Bench task lists for Harbor. |
+| [`SETA/`](./SETA/) | SETA task lists. |
 
-## Harbor Task Lists
+## Other Harbor supported datasets
 
-Task lists are owned here, not in `Agents/utils/common/Harbor`. The shared Harbor runner resolves these through `TASKS_DIR`.
+All datasets at [Harbor Hub Datasets](https://hub.harborframework.com/datasets) are also supported. Refer to [SWE-rebench-v2/](./SWE-rebench-v2) for more details.

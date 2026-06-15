@@ -14,6 +14,7 @@ The default is the oracle subset. The underlying Harbor CLI invocation uses
 Run through the normal Harbor entrypoint in non-interactive mode:
 
 ```bash
+# Change to other dataset if necessary
 DATASET_NAME=openthoughts/tasktrove-swe-rebench-v2-patched-oracle \
 bash Agents/utils/common/Harbor/start.sh bash Agents/utils/common/Harbor/harboropik.sh
 ```
@@ -21,6 +22,7 @@ bash Agents/utils/common/Harbor/start.sh bash Agents/utils/common/Harbor/harboro
 For a non-interactive dry-run of the same entrypoint:
 
 ```bash
+# Change to other dataset if necessary
 DATASET_NAME=openthoughts/tasktrove-swe-rebench-v2-patched-oracle \
 OUTPUT_ROOT=/tmp/swerebenchv2-runs \
 TB_DRY_RUN=1 \

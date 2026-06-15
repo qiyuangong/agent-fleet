@@ -45,7 +45,7 @@ OPENCODE_PROVIDER="${OPENCODE_PROVIDER:-custom}"
 
 HARBOR_ROOT="${HARBOR_ROOT:-/workspace/harbor}"
 # Dataset selection:
-#   DATASET_NAME: auto, seta, smith, terminalbench21, sweverify. auto infers from DATASET_PATH.
+#   DATASET_NAME: auto, seta, smith, terminalbench21, sweverify, swerebenchv2. auto infers from DATASET_PATH.
 #   DATASET_PATH examples:
 #     /workspace/seta-env/Harbor-Dataset
 #     /workspace/harbor/datasets/swesmith
@@ -210,6 +210,7 @@ TB_DOCKERHUB_CHECK_TIMEOUT="${TB_DOCKERHUB_CHECK_TIMEOUT:-8}"
 TB_DOCKERHUB_PREFLIGHT_STRICT="${TB_DOCKERHUB_PREFLIGHT_STRICT:-0}"
 SMITH_GENERATE_IF_MISSING="${SMITH_GENERATE_IF_MISSING:-1}"
 SMITH_ADAPTER_DIR="${SMITH_ADAPTER_DIR:-$HARBOR_ROOT/adapters/swesmith}"
+SWEREBENCHV2_HARBOR_DATASET="${SWEREBENCHV2_HARBOR_DATASET:-openthoughts/tasktrove-swe-rebench-v2-patched-oracle}"
 FIX_GIT_IMAGE_NAME="${FIX_GIT_IMAGE_NAME:-xiangyangli/fix-git:20260204}"
 FIX_GIT_WARM_LABEL="${FIX_GIT_WARM_LABEL:-io.codex.prewarmed}"
 
@@ -266,7 +267,7 @@ export TB_TIMEOUT_MULTIPLIER TB_AGENT_TIMEOUT_MULTIPLIER TB_AGENT_SETUP_TIMEOUT_
 export TB_CC_HOOK_SOURCE TB_CC_HOOK_MOUNT_PATH TB_CC_CLAUDE_TGZ_SOURCE TB_CC_CLAUDE_TGZ_MOUNT_PATH
 export TB_CC_PY_WHEEL_DIR_SOURCE TB_CC_PY_WHEEL_DIR_MOUNT_PATH TB_CC_NPM_CACHE_MOUNT_PATH TB_VERIFIER_UV_HOME TB_VERIFIER_UV_BIN_DIR_MOUNT_PATH TB_TRACE_TO_OPIK TB_CC_OPIK_DEBUG TB_CC_OPIK_INSTALL_DEPS
 export TB_PIP_INDEX_URL TB_PIP_EXTRA_INDEX_URL TB_PIP_TRUSTED_HOST TB_UV_INDEX_URL TB_UV_DEFAULT_INDEX TB_PIP_DEFAULT_TIMEOUT TB_PIP_RETRIES
-export OPIK_REPO_DIR COMPOSE_DIR TB_SKIP_DOCKERHUB_PREFLIGHT TB_DOCKERHUB_CHECK_TIMEOUT TB_DOCKERHUB_PREFLIGHT_STRICT SMITH_GENERATE_IF_MISSING SMITH_ADAPTER_DIR FIX_GIT_IMAGE_NAME FIX_GIT_WARM_LABEL
+export OPIK_REPO_DIR COMPOSE_DIR TB_SKIP_DOCKERHUB_PREFLIGHT TB_DOCKERHUB_CHECK_TIMEOUT TB_DOCKERHUB_PREFLIGHT_STRICT SMITH_GENERATE_IF_MISSING SMITH_ADAPTER_DIR SWEREBENCHV2_HARBOR_DATASET FIX_GIT_IMAGE_NAME FIX_GIT_WARM_LABEL
 export OPENCODE_PROVIDER OPENCODE_VERSION OPENCODE_TGZ_BASENAME OPENCODE_LINUX_X64_TGZ_BASENAME OPENCODE_CONFIG_CONTENT
 export NEXT_INDEX_FILE LOCK_FILE WORKERS_READY_FILE WORKERS_FAILED_FILE
 export PATH="/opt/tb-venv/bin:${PATH}"
@@ -367,6 +368,7 @@ harbor_dataset_kind() {
     *swesmith*|*smith*) printf 'smith\n' ;;
     *terminal-bench-2-1*|*terminalbench21*|*terminal-bench21*) printf 'terminalbench21\n' ;;
     *swebench-verified*|*sweverify*|*swe-verify*) printf 'sweverify\n' ;;
+    *swe-rebench*|*swerebench*) printf 'swerebenchv2\n' ;;
     *) printf 'harbor\n' ;;
   esac
 }
@@ -409,11 +411,15 @@ harbor_metric_mode() {
     printf '%s\n' "$METRIC_MODE"
     return 0
   fi
-  if [[ "$(harbor_dataset_kind)" == "seta" || "$(harbor_dataset_kind)" == "terminalbench21" || "$(harbor_dataset_kind)" == "sweverify" ]]; then
+  if [[ "$(harbor_dataset_kind)" == "seta" || "$(harbor_dataset_kind)" == "terminalbench21" || "$(harbor_dataset_kind)" == "sweverify" || "$(harbor_dataset_kind)" == "swerebenchv2" ]]; then
     printf 'success\n'
   else
     printf 'reward\n'
   fi
+}
+
+harbor_uses_registry_dataset() {
+  [[ "$(harbor_dataset_kind)" == "swerebenchv2" ]]
 }
 
 harbor_prepare_task_file() {
@@ -437,6 +443,10 @@ harbor_task_count() {
 harbor_ensure_dataset() {
   local dataset_kind
   dataset_kind="$(harbor_dataset_kind)"
+
+  if harbor_uses_registry_dataset; then
+    return 0
+  fi
 
   if [[ -d "$DATASET_PATH" ]] && [[ -n "$(find -L "$DATASET_PATH" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | head -n 1)" ]]; then
     return 0

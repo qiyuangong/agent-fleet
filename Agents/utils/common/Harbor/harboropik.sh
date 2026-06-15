@@ -491,7 +491,6 @@ PY
     -y
     --n-concurrent "$TB_N_CONCURRENT"
     --max-retries "$TB_MAX_RETRIES"
-    --path "$TB_PATH"
     -o "$out_dir"
     -k "$TB_RUNS"
     --ak "version=$CLAUDE_CODE_VERSION"
@@ -536,6 +535,11 @@ PY
     --timeout-multiplier "$TB_TIMEOUT_MULTIPLIER"
     --agent-setup-timeout-multiplier "$TB_AGENT_SETUP_TIMEOUT_MULTIPLIER"
   )
+  if harbor_uses_registry_dataset; then
+    cmd+=( --dataset "$SWEREBENCHV2_HARBOR_DATASET" )
+  else
+    cmd+=( --path "$TB_PATH" )
+  fi
   if [[ -n "${TB_VERIFIER_UV_HOME:-}" ]]; then
     cmd+=( --ve "HOME=$TB_VERIFIER_UV_HOME" )
   fi
@@ -606,19 +610,21 @@ wheel_dst = sys.argv[7]
 uv_src = sys.argv[8]
 uv_dst = sys.argv[9]
 mounts = []
+def bind_mount(src, dst):
+    return {"type": "bind", "source": src, "target": dst, "read_only": True}
 if hook_enabled:
-    mounts.append(f"{src}:{dst}:ro")
+    mounts.append(bind_mount(src, dst))
     if claude_src and os.path.exists(claude_src):
-        mounts.append(f"{claude_src}:{claude_dst}:ro")
+        mounts.append(bind_mount(claude_src, claude_dst))
     if wheel_src and os.path.exists(wheel_src):
-        mounts.append(f"{wheel_src}:{wheel_dst}:ro")
+        mounts.append(bind_mount(wheel_src, wheel_dst))
 if (
     uv_src
     and os.path.isdir(uv_src)
     and os.path.exists(os.path.join(uv_src, "uv"))
     and os.path.exists(os.path.join(uv_src, "uvx"))
 ):
-    mounts.append(f"{uv_src}:{uv_dst}:ro")
+    mounts.append(bind_mount(uv_src, uv_dst))
 print(json.dumps(mounts, ensure_ascii=True))
 PY
   )"
@@ -714,7 +720,11 @@ PY
 
   echo "[INFO] running TB with real-time Opik tracking"
   echo "[INFO] project: $OPIK_PROJECT_NAME"
-  echo "[INFO] agent: $TB_AGENT | runs: $TB_RUNS | path: $TB_PATH"
+  if harbor_uses_registry_dataset; then
+    echo "[INFO] agent: $TB_AGENT | runs: $TB_RUNS | dataset: $SWEREBENCHV2_HARBOR_DATASET"
+  else
+    echo "[INFO] agent: $TB_AGENT | runs: $TB_RUNS | path: $TB_PATH"
+  fi
   echo "[INFO] agent_import_path: ${TB_AGENT_IMPORT_PATH:-<none>}"
   echo "[INFO] output dir: $out_dir"
   echo "[INFO] dashboard: ${OPIK_BASE%/}/${OPIK_WORKSPACE}/home"
@@ -811,7 +821,6 @@ PY
       -y
       --n-concurrent 1
       --max-retries "$TB_MAX_RETRIES"
-      --path "$TB_PATH"
       -o "$out_dir"
       -k 1
       --ak "version=$OPENCODE_VERSION"
@@ -839,6 +848,11 @@ PY
       --timeout-multiplier "$TB_TIMEOUT_MULTIPLIER"
       --agent-setup-timeout-multiplier "$TB_AGENT_SETUP_TIMEOUT_MULTIPLIER"
     )
+    if harbor_uses_registry_dataset; then
+      cmd+=( --dataset "$SWEREBENCHV2_HARBOR_DATASET" )
+    else
+      cmd+=( --path "$TB_PATH" )
+    fi
 
     if [[ -n "${TB_AGENT_TIMEOUT_MULTIPLIER:-}" ]]; then
       cmd+=( --agent-timeout-multiplier "$TB_AGENT_TIMEOUT_MULTIPLIER" )
@@ -909,7 +923,11 @@ PY
   echo "[INFO] opencode run attempts=$N_ATTEMPTS"
   echo "[INFO] project: $OPIK_PROJECT_NAME"
   echo "[INFO] output dir: $out_dir"
-  echo "[INFO] path: $TB_PATH"
+  if harbor_uses_registry_dataset; then
+    echo "[INFO] dataset: $SWEREBENCHV2_HARBOR_DATASET"
+  else
+    echo "[INFO] path: $TB_PATH"
+  fi
   echo "[INFO] model: $TB_MODEL"
   echo "[INFO] opencode version: $OPENCODE_VERSION"
 

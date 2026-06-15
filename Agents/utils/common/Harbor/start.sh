@@ -57,13 +57,25 @@ if [[ "${RESET_RUN:-0}" == "1" ]]; then
   zellij delete-session "$ZELLIJ_SESSION_NAME" >/dev/null 2>&1 || true
   harbor_reset_run_state
 fi
-harbor_prepare_task_file
-harbor_start_online_analysis_if_enabled
+
+if [[ $# -eq 0 ]] && harbor_uses_registry_dataset; then
+  echo "[ERROR] DATASET_NAME=$(harbor_dataset_kind) uses a Harbor registry dataset." >&2
+  echo "[ERROR] Use the non-interactive entrypoint instead:" >&2
+  echo "[ERROR]   DATASET_NAME=$(harbor_dataset_kind) bash $SCRIPT_DIR/start.sh bash $SCRIPT_DIR/harboropik.sh" >&2
+  echo "[ERROR] zellij worker mode requires a materialized TASK_FILE and is not supported for registry datasets yet." >&2
+  exit 1
+fi
 
 if [[ $# -gt 0 ]]; then
+  if ! harbor_uses_registry_dataset; then
+    harbor_prepare_task_file
+  fi
+  harbor_start_online_analysis_if_enabled
   exec "$@"
 fi
 
+harbor_prepare_task_file
+harbor_start_online_analysis_if_enabled
 cd "$SCRIPT_DIR"
 "$SCRIPT_DIR/gen_harbor_zellij_layout.sh" "$LAYOUT_FILE"
 ensure_zellij_web_sharing_config

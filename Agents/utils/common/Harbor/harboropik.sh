@@ -254,6 +254,19 @@ ensure_tb_dataset() {
   git clone "$TB_DATASET_GIT_URL" "$TB_PATH"
 }
 
+prepare_local_dataset_if_needed() {
+  if harbor_uses_registry_dataset; then
+    return 0
+  fi
+
+  if [[ "$(harbor_dataset_kind)" == "harbor" ]]; then
+    ensure_tb_dataset
+  else
+    harbor_ensure_dataset
+  fi
+  harbor_prepare_task_file
+}
+
 start_opik_local() {
   if [[ ! -d "$COMPOSE_DIR" ]]; then
     echo "[ERROR] compose directory not found: $COMPOSE_DIR" >&2
@@ -536,7 +549,7 @@ PY
     --agent-setup-timeout-multiplier "$TB_AGENT_SETUP_TIMEOUT_MULTIPLIER"
   )
   if harbor_uses_registry_dataset; then
-    cmd+=( --dataset "$SWEREBENCHV2_HARBOR_DATASET" )
+    cmd+=( --dataset "$(harbor_registry_dataset_name)" )
   else
     cmd+=( --path "$TB_PATH" )
   fi
@@ -721,7 +734,7 @@ PY
   echo "[INFO] running TB with real-time Opik tracking"
   echo "[INFO] project: $OPIK_PROJECT_NAME"
   if harbor_uses_registry_dataset; then
-    echo "[INFO] agent: $TB_AGENT | runs: $TB_RUNS | dataset: $SWEREBENCHV2_HARBOR_DATASET"
+    echo "[INFO] agent: $TB_AGENT | runs: $TB_RUNS | dataset: $(harbor_registry_dataset_name)"
   else
     echo "[INFO] agent: $TB_AGENT | runs: $TB_RUNS | path: $TB_PATH"
   fi
@@ -849,7 +862,7 @@ PY
       --agent-setup-timeout-multiplier "$TB_AGENT_SETUP_TIMEOUT_MULTIPLIER"
     )
     if harbor_uses_registry_dataset; then
-      cmd+=( --dataset "$SWEREBENCHV2_HARBOR_DATASET" )
+      cmd+=( --dataset "$(harbor_registry_dataset_name)" )
     else
       cmd+=( --path "$TB_PATH" )
     fi
@@ -924,7 +937,7 @@ PY
   echo "[INFO] project: $OPIK_PROJECT_NAME"
   echo "[INFO] output dir: $out_dir"
   if harbor_uses_registry_dataset; then
-    echo "[INFO] dataset: $SWEREBENCHV2_HARBOR_DATASET"
+    echo "[INFO] dataset: $(harbor_registry_dataset_name)"
   else
     echo "[INFO] path: $TB_PATH"
   fi
@@ -985,12 +998,7 @@ main() {
     if [[ "$OPIK_MODE" == "local" ]]; then
       ensure_opik_repo
     fi
-    if [[ "$(harbor_dataset_kind)" == "harbor" ]]; then
-      ensure_tb_dataset
-    else
-      harbor_ensure_dataset
-    fi
-    harbor_prepare_task_file
+    prepare_local_dataset_if_needed
     if [[ "$OPIK_MODE" == "local" ]]; then
       start_opik_local
     elif [[ "$OPIK_BASE" == "http://localhost:5173" && "$OPIK_URL_OVERRIDE" == "http://localhost:5173/api" ]]; then
@@ -1040,12 +1048,7 @@ main() {
   if [[ "$OPIK_MODE" == "local" ]]; then
     ensure_opik_repo
   fi
-  if [[ "$(harbor_dataset_kind)" == "harbor" ]]; then
-    ensure_tb_dataset
-  else
-    harbor_ensure_dataset
-  fi
-  harbor_prepare_task_file
+  prepare_local_dataset_if_needed
   if [[ "$OPIK_MODE" == "local" ]]; then
     start_opik_local
   else

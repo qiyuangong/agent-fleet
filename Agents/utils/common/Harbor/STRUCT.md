@@ -31,14 +31,18 @@ Agents/utils/common/Harbor/
 
 ## Task Resolution
 
-`DATASET_NAME` selects a built-in task list:
+`DATASET_NAME` selects a built-in local dataset alias:
 
 - `seta`: `Tasks/SETA/harbor_tasks.txt`
 - `sweverify`: `Tasks/SWE-verify/harbor_tasks.txt`
 - `smith`: `Tasks/SWE-smith/harbor_tasks.txt`
 - `terminalbench21`: `Tasks/Terminal-bench-2/harbor_terminalbench21_tasks.txt`
 
-`TASK_SOURCE_FILE` overrides the built-in selection.
+`TASK_SOURCE_FILE` overrides the built-in selection. If `DATASET_NAME` contains
+`/` or `@`, it is treated as a Harbor registry dataset id and passed directly to
+`opik harbor run --dataset`. Registry datasets use the non-interactive
+`start.sh ... harboropik.sh` entrypoint because the zellij worker mode still
+expects a materialized `TASK_FILE`.
 
 Typical dataset paths:
 
@@ -48,6 +52,7 @@ Typical dataset paths:
 | SWE-Smith | `smith` | `/workspace/harbor/datasets/swesmith` | reward | `80` |
 | Terminal-Bench 2.1 | `terminalbench21` | `/workspace/terminal-bench-2-1/tasks` | success rate | `20` |
 | SWE-bench Verified | `sweverify` | `/workspace/swebench-verified` | success rate | `20` |
+| Harbor registry dataset | `owner/name` or `owner/name@version` | unset | set `METRIC_MODE` if needed | runner concurrency |
 
 ## Main Variables
 
@@ -57,7 +62,7 @@ Typical dataset paths:
 | `MODEL` | Model name passed to Harbor |
 | `BASE_URL` | Model gateway base URL |
 | `API_KEY` | Model gateway API key |
-| `DATASET_NAME` | Built-in task list selector |
+| `DATASET_NAME` | Built-in local dataset selector, or Harbor registry dataset id |
 | `DATASET_PATH` | Local dataset directory |
 | `TASK_SOURCE_FILE` | Explicit task list path |
 | `TOTAL_WORKERS` | Number of zellij workers |

@@ -1,0 +1,95 @@
+# AGENTS.md — Tasks/
+
+Benchmark task inputs and OpenClaw benchmark runners. Harbor task lists are
+consumed by the shared runner in `Agents/utils/common/Harbor/`; PinchBench
+and ClawBio run against an OpenClaw fleet from `Agents/Openclaw/` (see
+[Agents/AGENTS.md](../Agents/AGENTS.md)). Repo-wide config rules:
+[root AGENTS.md](../AGENTS.md).
+
+## Layout
+
+| Path | Role |
+| --- | --- |
+| `SETA/`, `SWE-smith/`, `SWE-verify/`, `Terminal-bench-2/` | Harbor task lists |
+| `Pinchbench/` | PinchBench runner for the OpenClaw fleet |
+| `clawBio/` | ClawBio bioinformatics benchmark for the OpenClaw fleet |
+
+## Harbor Task Lists
+
+Selected by `DATASET_NAME` in the Harbor runner:
+
+- `seta` → `SETA/harbor_tasks.txt`
+- `smith` → `SWE-smith/harbor_tasks.txt`
+- `sweverify` → `SWE-verify/harbor_tasks.txt`
+- `terminalbench21` → `Terminal-bench-2/harbor_terminalbench21_tasks.txt`
+
+`TASK_SOURCE_FILE=<path>` overrides the built-in selection. Task lists are
+owned here — don't duplicate them under `Agents/`.
+
+## PinchBench (`Pinchbench/`)
+
+Shards PinchBench tasks across OpenClaw gateway instances (one Docker
+worker per gateway) and merges results.
+
+Prereq: a running OpenClaw fleet ([Agents/AGENTS.md](../Agents/AGENTS.md)).
+
+```bash
+$EDITOR Tasks/Pinchbench/config/pinchbench.env   # usually only MODEL_ID needed
+API_KEY="$PROVIDER_API_KEY" ./Tasks/Pinchbench/scripts/run-parallel-workers.py --instances 3
+# multiple iterations:
+API_KEY="$PROVIDER_API_KEY" ./Tasks/Pinchbench/scripts/run-parallel-workers.py --instances 3 -n 5
+```
+
+Sanity-check a new setup first:
+
+```bash
+API_KEY="$PROVIDER_API_KEY" ./Tasks/Pinchbench/scripts/run-parallel-workers.py \
+  --instances 1 --suite task_sanity
+```
+
+For local OpenAI-compatible backends (vLLM/SGLang), also set
+`PINCHBENCH_MODEL_PROVIDER` in `pinchbench.env`. The runner clones the
+pinned upstream PinchBench into `/tmp/pinchbench-skill` and applies
+`Tasks/Pinchbench/patches/`.
+
+Outputs: `Tasks/Pinchbench/.pinchbench-results-docker/<timestamp>/`
+(`iteration-NNN/parallel-merged.json`, `iterations-summary.{json,md}`).
+Terminal summary of a merged file (defaults to the latest run):
+
+```bash
+python3 Tasks/Pinchbench/scripts/summary.py
+```
+
+Full configuration table and worker/gateway mount details:
+[Pinchbench/README.md](Pinchbench/README.md).
+
+## ClawBio (`clawBio/`)
+
+Five-phase pipeline (prewarm plugin cache → fleet `setup.sh` with
+`PLUGIN_CACHE_DIR` → `patch-plugin-config.sh` → `docker compose up -d` →
+`run-benchmark.py`). The unified launcher runs all of it:
+
+```bash
+./Tasks/clawBio/scripts/run-openclaw-clawbio.sh
+COUNT=20 ITERATIONS=3 ./Tasks/clawBio/scripts/run-openclaw-clawbio.sh   # overrides
+```
+
+`patch-plugin-config.sh` must run after `setup.sh` and before
+`docker compose up`. The phase-by-phase manual flow with the full
+environment-variable example: [clawBio/README.md](clawBio/README.md).
+
+Outputs: `Tasks/clawBio/results/latest/` →
+`iterations-summary.{json,md}`, `iteration-NNN/results.{json,md}`, and
+per-task logs/artifacts under `instances/<N>/<task-id>/`.
+
+Sandbox errors ("path escapes sandbox"): rerun `setup.sh` with
+`WORKSPACE_ONLY=false`.
+
+## Development
+
+Run from the repo root:
+
+```bash
+python3 -m unittest discover -s Tasks/Pinchbench/tests
+python3 -m unittest discover -s Tasks/clawBio/tests
+```

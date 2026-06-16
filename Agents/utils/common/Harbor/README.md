@@ -67,18 +67,16 @@ Use these values in `env.sh`:
 | Terminal-Bench 2.1 | `terminalbench21` | `/workspace/terminal-bench-2-1/tasks` | `20` |
 | SWE-bench Verified | `sweverify` | `/workspace/swebench-verified` | `20` |
 
-For any Harbor registry dataset, pass the dataset id directly and use the
-non-interactive entrypoint:
+For any Harbor registry dataset, pass the dataset id directly and use the normal
+zellij entrypoint:
 
 ```bash
 DATASET_NAME=openthoughts/tasktrove-swe-rebench-v2-patched-oracle \
-bash Agents/utils/common/Harbor/start.sh bash Agents/utils/common/Harbor/harboropik.sh
+bash Agents/utils/common/Harbor/start.sh --detach
 ```
 
-This path passes `--dataset "$DATASET_NAME"` to Harbor instead of preparing a
-local task file from `DATASET_PATH`. The bare zellij entrypoint still requires a
-materialized `TASK_FILE`, so registry datasets are intentionally non-interactive
-for now.
+Registry runs pass `--dataset "$DATASET_NAME"` to Harbor instead of preparing a
+local task file from `DATASET_PATH`.
 
 ## More Details
 

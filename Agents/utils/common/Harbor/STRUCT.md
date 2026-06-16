@@ -40,9 +40,9 @@ Agents/utils/common/Harbor/
 
 `TASK_SOURCE_FILE` overrides the built-in selection. If `DATASET_NAME` contains
 `/` or `@`, it is treated as a Harbor registry dataset id and passed directly to
-`opik harbor run --dataset`. Registry datasets use the non-interactive
-`start.sh ... harboropik.sh` entrypoint because the zellij worker mode still
-expects a materialized `TASK_FILE`.
+`opik harbor run --dataset`. Registry datasets can use the normal zellij
+entrypoint as a single-pane wrapper around `harboropik.sh`; the local
+multi-worker queue mode still expects a materialized `TASK_FILE`.
 
 Typical dataset paths:
 

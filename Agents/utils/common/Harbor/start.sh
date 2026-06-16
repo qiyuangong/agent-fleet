@@ -58,14 +58,6 @@ if [[ "${RESET_RUN:-0}" == "1" ]]; then
   harbor_reset_run_state
 fi
 
-if [[ $# -eq 0 ]] && harbor_uses_registry_dataset; then
-  echo "[ERROR] DATASET_NAME=$(harbor_registry_dataset_name) uses a Harbor registry dataset." >&2
-  echo "[ERROR] Use the non-interactive entrypoint instead:" >&2
-  echo "[ERROR]   DATASET_NAME=$(harbor_registry_dataset_name) bash $SCRIPT_DIR/start.sh bash $SCRIPT_DIR/harboropik.sh" >&2
-  echo "[ERROR] zellij worker mode requires a materialized TASK_FILE and is not supported for registry datasets yet." >&2
-  exit 1
-fi
-
 if [[ $# -gt 0 ]]; then
   if ! harbor_uses_registry_dataset; then
     harbor_prepare_task_file
@@ -74,10 +66,16 @@ if [[ $# -gt 0 ]]; then
   exec "$@"
 fi
 
-harbor_prepare_task_file
+if ! harbor_uses_registry_dataset; then
+  harbor_prepare_task_file
+fi
 harbor_start_online_analysis_if_enabled
 cd "$SCRIPT_DIR"
-"$SCRIPT_DIR/gen_harbor_zellij_layout.sh" "$LAYOUT_FILE"
+if harbor_uses_registry_dataset; then
+  "$SCRIPT_DIR/gen_harbor_registry_zellij_layout.sh" "$LAYOUT_FILE"
+else
+  "$SCRIPT_DIR/gen_harbor_zellij_layout.sh" "$LAYOUT_FILE"
+fi
 ensure_zellij_web_sharing_config
 
 if [[ "$DETACH_MODE" == "true" ]]; then

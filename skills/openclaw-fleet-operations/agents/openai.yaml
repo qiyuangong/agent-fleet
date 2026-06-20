@@ -1,0 +1,4 @@
+interface:
+  display_name: "OpenClaw Fleet Operations"
+  short_description: "Operate OpenClaw gateway fleets"
+  default_prompt: "Use $openclaw-fleet-operations to generate or debug an OpenClaw fleet."

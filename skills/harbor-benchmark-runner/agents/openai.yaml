@@ -1,0 +1,4 @@
+interface:
+  display_name: "Harbor Benchmark Runner"
+  short_description: "Run Harbor benchmark fleets"
+  default_prompt: "Use $harbor-benchmark-runner to configure and launch a Harbor benchmark run."

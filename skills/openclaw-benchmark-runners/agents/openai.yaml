@@ -1,0 +1,4 @@
+interface:
+  display_name: "OpenClaw Benchmark Runners"
+  short_description: "Run PinchBench and ClawBio"
+  default_prompt: "Use $openclaw-benchmark-runners to run an OpenClaw benchmark."

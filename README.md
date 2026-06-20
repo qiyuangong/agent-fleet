@@ -82,6 +82,42 @@ Configure the dataset in `env.sh`:
 | Terminal-Bench 2.1 | `terminalbench21` | `/workspace/terminal-bench-2-1/tasks` |
 | SWE-bench Verified | `sweverify` | `/workspace/swebench-verified` |
 
+## Use Skills to Operate Fleet/Benchmark
+
+0. Prerequisites:
+* Login to the target server.
+* Set up a code agent such as Claude Code, OpenCode, or Pi.
+
+1. Install or load the skills for your code agent according to [Install Skills](./skills/README.md#install-skills).
+
+2. Configure private runtime values when needed:
+
+```bash
+cp config.env config.local.env
+vim config.local.env
+```
+
+3. Prompt the code agent to operate the fleet or run benchmarks on the target server.
+
+```bash
+PROMPT_FILE=./skills/e2e-harbor-benchmark.txt
+# PROMPT_FILE=./skills/e2e-openclaw-benchmark.txt
+
+# Claude Code: run the selected prompt file.
+claude --no-session-persistence --permission-mode bypassPermissions --tools default -p "$(cat "$PROMPT_FILE")"
+
+# OpenCode: run the selected prompt file.
+opencode run --dangerously-skip-permissions "$(cat "$PROMPT_FILE")"
+
+# Pi: run the selected prompt file.
+pi --no-session --approve --tools read,bash,edit,write,grep,find,ls -p "$(cat "$PROMPT_FILE")"
+```
+
+These prompts have been verified with GLM-5.1:
+
+- [`e2e-openclaw-benchmark.txt`](./skills/e2e-openclaw-benchmark.txt) — set up the OpenClaw fleet and run OpenClaw benchmark smoke tests
+- [`e2e-harbor-benchmark.txt`](./skills/e2e-harbor-benchmark.txt) — run Harbor benchmark smoke tests
+
 ## More Details
 
 - Repository structure: [STRUCT.md](./STRUCT.md)

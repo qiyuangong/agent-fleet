@@ -1,0 +1,24 @@
+Use the repo skills only, not ad-hoc scripts, to verify an OpenClaw fleet and
+small OpenClaw benchmark smoke run.
+
+Before doing anything:
+- Read ./config.env and ./config.local.env if present.
+- Treat config.local.env as private. Use BASE_URL, API_KEY, MODEL_ID or MODEL,
+  Opik values, and other runtime settings from config.local.env or the caller
+  environment, but do not print secrets.
+- Load and follow these repo skills:
+  - skills/openclaw-fleet-operations
+  - skills/openclaw-benchmark-runners
+
+Requirements:
+1. Verify the LLM endpoint before benchmark use when BASE_URL,
+   API_KEY, and MODEL_ID or MODEL are available.
+2. Create or verify an OpenClaw fleet with 10 instances unless config.local.env
+   or the caller requests another count.
+3. Use isolated names, prefixes, workspaces, and result directories for the run.
+4. Run 3 PinchBench sanity tasks through the OpenClaw fleet.
+5. Run 3 ClawBio tasks through the OpenClaw fleet.
+6. Capture exact commands, result paths, success counts, failed tasks, and
+   whether failures are operator/setup failures or task/agent outcomes.
+7. Do not run long full benchmarks unless explicitly requested.
+8. Do not edit repository files unless the skill workflow requires it.

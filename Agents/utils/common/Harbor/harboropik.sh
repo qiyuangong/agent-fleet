@@ -100,6 +100,34 @@ need_cmd() {
   fi
 }
 
+cargo_registry_env_suffix() {
+  local suffix="$1"
+  suffix="${suffix//-/_}"
+  suffix="${suffix//./_}"
+  printf '%s\n' "$suffix" | tr '[:lower:]' '[:upper:]'
+}
+
+append_rust_package_mirror_env() {
+  local flag="$1"
+  if [[ -n "${TB_RUSTUP_UPDATE_ROOT:-}" ]]; then
+    cmd+=( "$flag" "RUSTUP_UPDATE_ROOT=$TB_RUSTUP_UPDATE_ROOT" )
+  fi
+  if [[ -n "${TB_RUSTUP_DIST_SERVER:-}" ]]; then
+    cmd+=( "$flag" "RUSTUP_DIST_SERVER=$TB_RUSTUP_DIST_SERVER" )
+  fi
+  if [[ -n "${TB_CARGO_REGISTRY_REPLACE_WITH:-}" && -n "${TB_CARGO_REGISTRY_URL:-}" ]]; then
+    local registry_suffix
+    registry_suffix="$(cargo_registry_env_suffix "$TB_CARGO_REGISTRY_REPLACE_WITH")"
+    cmd+=(
+      "$flag" "CARGO_REGISTRY_REPLACE_WITH=$TB_CARGO_REGISTRY_REPLACE_WITH"
+      "$flag" "CARGO_REGISTRY_URL=$TB_CARGO_REGISTRY_URL"
+      "$flag" "CARGO_SOURCE_CRATES_IO_REPLACE_WITH=$TB_CARGO_REGISTRY_REPLACE_WITH"
+      "$flag" "CARGO_SOURCE_${registry_suffix}_REGISTRY=$TB_CARGO_REGISTRY_URL"
+      "$flag" "CARGO_REGISTRIES_${registry_suffix}_INDEX=$TB_CARGO_REGISTRY_URL"
+    )
+  fi
+}
+
 ensure_trace_plugin_source_if_needed() {
   if [[ "$TB_DRY_RUN" == "1" ]]; then
     return 0
@@ -683,6 +711,8 @@ PY
   if [[ -n "$TB_GOSUMDB" ]]; then
     cmd+=( --ae "GOSUMDB=$TB_GOSUMDB" --ve "GOSUMDB=$TB_GOSUMDB" )
   fi
+  append_rust_package_mirror_env --ae
+  append_rust_package_mirror_env --ve
 
   if [[ "$TB_DEBUG" == "1" ]]; then
     cmd+=( --debug )
@@ -938,6 +968,8 @@ PY
     if [[ -n "${TB_GOSUMDB:-}" ]]; then
       cmd+=( --ae "GOSUMDB=$TB_GOSUMDB" --ve "GOSUMDB=$TB_GOSUMDB" )
     fi
+    append_rust_package_mirror_env --ae
+    append_rust_package_mirror_env --ve
 
     if [[ -n "$INCLUDE_TASKS" ]]; then
       IFS=',' read -r -a include_arr <<< "$INCLUDE_TASKS"

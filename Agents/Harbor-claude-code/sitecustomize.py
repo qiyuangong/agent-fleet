@@ -51,6 +51,46 @@ def _is_true(value: str | None) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _rust_package_mirror_bootstrap(extra_env: dict[str, str] | None) -> str:
+    extra_env = extra_env or {}
+    rustup_update_root = extra_env.get("RUSTUP_UPDATE_ROOT", "")
+    rustup_dist_server = extra_env.get("RUSTUP_DIST_SERVER", "")
+    cargo_replace_with = extra_env.get("CARGO_REGISTRY_REPLACE_WITH", "")
+    cargo_registry_url = extra_env.get("CARGO_REGISTRY_URL", "")
+
+    parts = []
+    if rustup_update_root:
+        parts.append(f"export RUSTUP_UPDATE_ROOT={shlex.quote(rustup_update_root)}")
+    if rustup_dist_server:
+        parts.append(f"export RUSTUP_DIST_SERVER={shlex.quote(rustup_dist_server)}")
+    if cargo_replace_with and cargo_registry_url:
+        parts.extend(
+            [
+                f"export CARGO_REGISTRY_REPLACE_WITH={shlex.quote(cargo_replace_with)}",
+                f"export CARGO_REGISTRY_URL={shlex.quote(cargo_registry_url)}",
+                "cargo_home=\"${CARGO_HOME:-$HOME/.cargo}\"",
+                "mkdir -p \"$cargo_home\"",
+                "cargo_config=\"$cargo_home/config.toml\"",
+                "tmp_config=\"$cargo_home/config.toml.tmp.$$\"",
+                "if [ -f \"$cargo_config\" ] && command -v awk >/dev/null 2>&1; then "
+                "awk -v mirror=\"$CARGO_REGISTRY_REPLACE_WITH\" "
+                "'BEGIN { skip=0 } "
+                "/^\\[/ { skip = ($0 == \"[source.crates-io]\" || $0 == \"[source.\" mirror \"]\" || $0 == \"[registries.\" mirror \"]\") } "
+                "!skip { print }' \"$cargo_config\" > \"$tmp_config\"; "
+                "elif [ -f \"$cargo_config\" ]; then cp \"$cargo_config\" \"$tmp_config\"; "
+                "else : > \"$tmp_config\"; fi",
+                "printf '\\n[source.crates-io]\\nreplace-with = \"%s\"\\n\\n[source.%s]\\nregistry = \"%s\"\\n\\n[registries.%s]\\nindex = \"%s\"\\n' "
+                "\"$CARGO_REGISTRY_REPLACE_WITH\" \"$CARGO_REGISTRY_REPLACE_WITH\" \"$CARGO_REGISTRY_URL\" "
+                "\"$CARGO_REGISTRY_REPLACE_WITH\" \"$CARGO_REGISTRY_URL\" >> \"$tmp_config\"",
+                "mv \"$tmp_config\" \"$cargo_config\"",
+            ]
+        )
+
+    if not parts:
+        return ""
+    return "set +e; " + "; ".join(parts) + "; set -e"
+
+
 def _fix_unquoted_append_system_prompt(command: str) -> str:
     """Fix Harbor's missing shell-quoting of --append-system-prompt value.
 
@@ -300,6 +340,10 @@ def _patch_claude_code_realtime_hooks() -> None:
             self.exec_as_agent = original_exec_as_agent
 
         extra_env = getattr(self, "_extra_env", None)
+        rust_mirror_bootstrap = _rust_package_mirror_bootstrap(extra_env)
+        if rust_mirror_bootstrap:
+            await self.exec_as_agent(environment, command=rust_mirror_bootstrap)
+
         if not _hook_enabled(extra_env):
             return
         if not _is_true((extra_env or {}).get("CC_OPIK_INSTALL_DEPS", "true")):

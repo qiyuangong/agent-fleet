@@ -671,6 +671,9 @@ PY
   if [[ -n "$TB_UV_DEFAULT_INDEX" ]]; then
     cmd+=( --ae "UV_DEFAULT_INDEX=$TB_UV_DEFAULT_INDEX" --ve "UV_DEFAULT_INDEX=$TB_UV_DEFAULT_INDEX" )
   fi
+  if [[ -n "$TB_NPM_CONFIG_REGISTRY" ]]; then
+    cmd+=( --ae "NPM_CONFIG_REGISTRY=$TB_NPM_CONFIG_REGISTRY" --ve "NPM_CONFIG_REGISTRY=$TB_NPM_CONFIG_REGISTRY" )
+  fi
 
   if [[ "$TB_DEBUG" == "1" ]]; then
     cmd+=( --debug )
@@ -913,6 +916,9 @@ PY
     fi
     if [[ -n "${TB_PIP_TRUSTED_HOST:-}" ]]; then
       cmd+=( --ae "PIP_TRUSTED_HOST=$TB_PIP_TRUSTED_HOST" )
+    fi
+    if [[ -n "${TB_NPM_CONFIG_REGISTRY:-}" ]]; then
+      cmd+=( --ae "NPM_CONFIG_REGISTRY=$TB_NPM_CONFIG_REGISTRY" --ve "NPM_CONFIG_REGISTRY=$TB_NPM_CONFIG_REGISTRY" )
     fi
 
     if [[ -n "$INCLUDE_TASKS" ]]; then

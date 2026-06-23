@@ -7,7 +7,7 @@ PYTHON_BIN="${PYTHON_BIN:-python3.12}"
 CLAUDE_CODE_VERSION="${CLAUDE_CODE_VERSION:-latest}"
 OPENCODE_VERSION="${OPENCODE_VERSION:-latest}"
 PREPARE_OPENCODE_CACHE="${PREPARE_OPENCODE_CACHE:-0}"
-NPM_REGISTRY_URL="${NPM_REGISTRY_URL:-${NPM_CONFIG_REGISTRY:-https://registry.npmjs.org}}"
+NPM_REGISTRY_URL="${NPM_REGISTRY_URL:-${TB_NPM_CONFIG_REGISTRY:-${NPM_CONFIG_REGISTRY:-https://registry.npmjs.org}}}"
 CLAUDE_CODE_NPM_SPEC="@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
 CLAUDE_CODE_TGZ_BASENAME="${CLAUDE_CODE_TGZ_BASENAME:-claude-code-${CLAUDE_CODE_VERSION}.tgz}"
 OPENCODE_TGZ_BASENAME="${OPENCODE_TGZ_BASENAME:-opencode-ai-${OPENCODE_VERSION}.tgz}"
@@ -252,7 +252,7 @@ pack_npm_to_cache() {
       trap 'rm -rf "$tmp_dir"' EXIT
       (
         cd "$tmp_dir"
-        pkg="$(npm pack "$npm_spec")"
+        pkg="$(npm pack --registry "$NPM_REGISTRY_URL" "$npm_spec")"
         mv "$pkg" "$WHEEL_DIR/"
       )
     fi
@@ -368,9 +368,9 @@ PY
 
 claude_meta_url="$(
   if [[ "$CLAUDE_CODE_VERSION" == "latest" ]]; then
-    printf '%s\n' "https://registry.npmjs.org/@anthropic-ai/claude-code/latest"
+    printf '%s\n' "${NPM_REGISTRY_URL%/}/@anthropic-ai/claude-code/latest"
   else
-    printf '%s\n' "https://registry.npmjs.org/@anthropic-ai/claude-code/${CLAUDE_CODE_VERSION}"
+    printf '%s\n' "${NPM_REGISTRY_URL%/}/@anthropic-ai/claude-code/${CLAUDE_CODE_VERSION}"
   fi
 )"
 opencode_meta_url="$(
@@ -404,6 +404,7 @@ prepare_claude_npm_cache() {
     # version, including platform optional packages. Task containers then use
     # this cache with `npm --offline` instead of resolving from registry.
     npm install \
+      --registry "$NPM_REGISTRY_URL" \
       --cache "$CLAUDE_NPM_CACHE_DIR" \
       --ignore-scripts \
       --no-audit \

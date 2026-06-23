@@ -674,6 +674,15 @@ PY
   if [[ -n "$TB_NPM_CONFIG_REGISTRY" ]]; then
     cmd+=( --ae "NPM_CONFIG_REGISTRY=$TB_NPM_CONFIG_REGISTRY" --ve "NPM_CONFIG_REGISTRY=$TB_NPM_CONFIG_REGISTRY" )
   fi
+  if [[ -n "$TB_GO111MODULE" ]]; then
+    cmd+=( --ae "GO111MODULE=$TB_GO111MODULE" --ve "GO111MODULE=$TB_GO111MODULE" )
+  fi
+  if [[ -n "$TB_GOPROXY" ]]; then
+    cmd+=( --ae "GOPROXY=$TB_GOPROXY" --ve "GOPROXY=$TB_GOPROXY" )
+  fi
+  if [[ -n "$TB_GOSUMDB" ]]; then
+    cmd+=( --ae "GOSUMDB=$TB_GOSUMDB" --ve "GOSUMDB=$TB_GOSUMDB" )
+  fi
 
   if [[ "$TB_DEBUG" == "1" ]]; then
     cmd+=( --debug )
@@ -919,6 +928,15 @@ PY
     fi
     if [[ -n "${TB_NPM_CONFIG_REGISTRY:-}" ]]; then
       cmd+=( --ae "NPM_CONFIG_REGISTRY=$TB_NPM_CONFIG_REGISTRY" --ve "NPM_CONFIG_REGISTRY=$TB_NPM_CONFIG_REGISTRY" )
+    fi
+    if [[ -n "${TB_GO111MODULE:-}" ]]; then
+      cmd+=( --ae "GO111MODULE=$TB_GO111MODULE" --ve "GO111MODULE=$TB_GO111MODULE" )
+    fi
+    if [[ -n "${TB_GOPROXY:-}" ]]; then
+      cmd+=( --ae "GOPROXY=$TB_GOPROXY" --ve "GOPROXY=$TB_GOPROXY" )
+    fi
+    if [[ -n "${TB_GOSUMDB:-}" ]]; then
+      cmd+=( --ae "GOSUMDB=$TB_GOSUMDB" --ve "GOSUMDB=$TB_GOSUMDB" )
     fi
 
     if [[ -n "$INCLUDE_TASKS" ]]; then

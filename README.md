@@ -2,6 +2,14 @@
 
 SII Agent Fleet provides runnable agent integrations and benchmark task lists for Harbor-based evaluation. The main supported Harbor agents are Claude Code and OpenCode.
 
+## Prerequisites
+
+* Docker + Docker Compose v2
+* Python >= 3.9
+* git
+* zellij
+* Others: npm, jq, openssl
+
 ## Quick Start: Harbor
 
 Clone the repository with the Opik plugin submodule:
@@ -98,6 +106,10 @@ vim config.local.env
 ```
 
 3. Prompt the code agent to operate the fleet or run benchmarks on the target server.
+
+   > [!NOTE]
+   > The e2e prompt examples usually take 10-20 minutes, depending on environment readiness.
+   > Use a persistent terminal session such as `tmux` or `zellij` so the run can continue if the connection drops.
 
 ```bash
 PROMPT_FILE=./skills/e2e-harbor-benchmark.txt

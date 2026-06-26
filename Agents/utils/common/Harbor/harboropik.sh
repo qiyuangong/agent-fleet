@@ -109,21 +109,21 @@ cargo_registry_env_suffix() {
 
 append_rust_package_mirror_env() {
   local flag="$1"
-  if [[ -n "${TB_RUSTUP_UPDATE_ROOT:-}" ]]; then
-    cmd+=( "$flag" "RUSTUP_UPDATE_ROOT=$TB_RUSTUP_UPDATE_ROOT" )
+  if [[ -n "${RUSTUP_UPDATE_ROOT:-}" ]]; then
+    cmd+=( "$flag" "RUSTUP_UPDATE_ROOT=$RUSTUP_UPDATE_ROOT" )
   fi
-  if [[ -n "${TB_RUSTUP_DIST_SERVER:-}" ]]; then
-    cmd+=( "$flag" "RUSTUP_DIST_SERVER=$TB_RUSTUP_DIST_SERVER" )
+  if [[ -n "${RUSTUP_DIST_SERVER:-}" ]]; then
+    cmd+=( "$flag" "RUSTUP_DIST_SERVER=$RUSTUP_DIST_SERVER" )
   fi
-  if [[ -n "${TB_CARGO_REGISTRY_REPLACE_WITH:-}" && -n "${TB_CARGO_REGISTRY_URL:-}" ]]; then
+  if [[ -n "${CARGO_REGISTRY_REPLACE_WITH:-}" && -n "${CARGO_REGISTRY_URL:-}" ]]; then
     local registry_suffix
-    registry_suffix="$(cargo_registry_env_suffix "$TB_CARGO_REGISTRY_REPLACE_WITH")"
+    registry_suffix="$(cargo_registry_env_suffix "$CARGO_REGISTRY_REPLACE_WITH")"
     cmd+=(
-      "$flag" "CARGO_REGISTRY_REPLACE_WITH=$TB_CARGO_REGISTRY_REPLACE_WITH"
-      "$flag" "CARGO_REGISTRY_URL=$TB_CARGO_REGISTRY_URL"
-      "$flag" "CARGO_SOURCE_CRATES_IO_REPLACE_WITH=$TB_CARGO_REGISTRY_REPLACE_WITH"
-      "$flag" "CARGO_SOURCE_${registry_suffix}_REGISTRY=$TB_CARGO_REGISTRY_URL"
-      "$flag" "CARGO_REGISTRIES_${registry_suffix}_INDEX=$TB_CARGO_REGISTRY_URL"
+      "$flag" "CARGO_REGISTRY_REPLACE_WITH=$CARGO_REGISTRY_REPLACE_WITH"
+      "$flag" "CARGO_REGISTRY_URL=$CARGO_REGISTRY_URL"
+      "$flag" "CARGO_SOURCE_CRATES_IO_REPLACE_WITH=$CARGO_REGISTRY_REPLACE_WITH"
+      "$flag" "CARGO_SOURCE_${registry_suffix}_REGISTRY=$CARGO_REGISTRY_URL"
+      "$flag" "CARGO_REGISTRIES_${registry_suffix}_INDEX=$CARGO_REGISTRY_URL"
     )
   fi
 }
@@ -683,33 +683,33 @@ PY
     )
   fi
 
-  if [[ -n "$TB_PIP_INDEX_URL" ]]; then
-    cmd+=( --ae "PIP_INDEX_URL=$TB_PIP_INDEX_URL" --ve "PIP_INDEX_URL=$TB_PIP_INDEX_URL" )
+  if [[ -n "${PIP_INDEX_URL:-}" ]]; then
+    cmd+=( --ae "PIP_INDEX_URL=$PIP_INDEX_URL" --ve "PIP_INDEX_URL=$PIP_INDEX_URL" )
   fi
-  if [[ -n "$TB_PIP_EXTRA_INDEX_URL" ]]; then
-    cmd+=( --ae "PIP_EXTRA_INDEX_URL=$TB_PIP_EXTRA_INDEX_URL" --ve "PIP_EXTRA_INDEX_URL=$TB_PIP_EXTRA_INDEX_URL" )
+  if [[ -n "${PIP_EXTRA_INDEX_URL:-}" ]]; then
+    cmd+=( --ae "PIP_EXTRA_INDEX_URL=$PIP_EXTRA_INDEX_URL" --ve "PIP_EXTRA_INDEX_URL=$PIP_EXTRA_INDEX_URL" )
   fi
-  if [[ -n "$TB_PIP_TRUSTED_HOST" ]]; then
-    cmd+=( --ae "PIP_TRUSTED_HOST=$TB_PIP_TRUSTED_HOST" --ve "PIP_TRUSTED_HOST=$TB_PIP_TRUSTED_HOST" )
+  if [[ -n "${PIP_TRUSTED_HOST:-}" ]]; then
+    cmd+=( --ae "PIP_TRUSTED_HOST=$PIP_TRUSTED_HOST" --ve "PIP_TRUSTED_HOST=$PIP_TRUSTED_HOST" )
   fi
-  if [[ -n "$TB_UV_INDEX_URL" ]]; then
+  if [[ -n "${UV_INDEX_URL:-}" ]]; then
     # SWE-smith verifier scripts run `uv add ...`; pip env alone is ignored by uv.
-    cmd+=( --ae "UV_INDEX_URL=$TB_UV_INDEX_URL" --ve "UV_INDEX_URL=$TB_UV_INDEX_URL" )
+    cmd+=( --ae "UV_INDEX_URL=$UV_INDEX_URL" --ve "UV_INDEX_URL=$UV_INDEX_URL" )
   fi
-  if [[ -n "$TB_UV_DEFAULT_INDEX" ]]; then
-    cmd+=( --ae "UV_DEFAULT_INDEX=$TB_UV_DEFAULT_INDEX" --ve "UV_DEFAULT_INDEX=$TB_UV_DEFAULT_INDEX" )
+  if [[ -n "${UV_DEFAULT_INDEX:-}" ]]; then
+    cmd+=( --ae "UV_DEFAULT_INDEX=$UV_DEFAULT_INDEX" --ve "UV_DEFAULT_INDEX=$UV_DEFAULT_INDEX" )
   fi
-  if [[ -n "$TB_NPM_CONFIG_REGISTRY" ]]; then
-    cmd+=( --ae "NPM_CONFIG_REGISTRY=$TB_NPM_CONFIG_REGISTRY" --ve "NPM_CONFIG_REGISTRY=$TB_NPM_CONFIG_REGISTRY" )
+  if [[ -n "${NPM_CONFIG_REGISTRY:-}" ]]; then
+    cmd+=( --ae "NPM_CONFIG_REGISTRY=$NPM_CONFIG_REGISTRY" --ve "NPM_CONFIG_REGISTRY=$NPM_CONFIG_REGISTRY" )
   fi
-  if [[ -n "$TB_GO111MODULE" ]]; then
-    cmd+=( --ae "GO111MODULE=$TB_GO111MODULE" --ve "GO111MODULE=$TB_GO111MODULE" )
+  if [[ -n "${GO111MODULE:-}" ]]; then
+    cmd+=( --ae "GO111MODULE=$GO111MODULE" --ve "GO111MODULE=$GO111MODULE" )
   fi
-  if [[ -n "$TB_GOPROXY" ]]; then
-    cmd+=( --ae "GOPROXY=$TB_GOPROXY" --ve "GOPROXY=$TB_GOPROXY" )
+  if [[ -n "${GOPROXY:-}" ]]; then
+    cmd+=( --ae "GOPROXY=$GOPROXY" --ve "GOPROXY=$GOPROXY" )
   fi
-  if [[ -n "$TB_GOSUMDB" ]]; then
-    cmd+=( --ae "GOSUMDB=$TB_GOSUMDB" --ve "GOSUMDB=$TB_GOSUMDB" )
+  if [[ -n "${GOSUMDB:-}" ]]; then
+    cmd+=( --ae "GOSUMDB=$GOSUMDB" --ve "GOSUMDB=$GOSUMDB" )
   fi
   append_rust_package_mirror_env --ae
   append_rust_package_mirror_env --ve
@@ -789,7 +789,7 @@ PY
   echo "[INFO] retry_include_exceptions: ${TB_RETRY_INCLUDE_EXCEPTIONS:-<all-except-excludes>}"
   echo "[INFO] retry_exclude_exceptions: ${TB_RETRY_EXCLUDE_EXCEPTIONS:-<none>}"
   echo "[INFO] realtime_hook_enabled: $TB_CC_OPIK_ENABLE_HOOK | hook_source: $TB_CC_HOOK_SOURCE"
-  echo "[INFO] pip_index_url: ${TB_PIP_INDEX_URL:-<default>} | pip_timeout: $TB_PIP_DEFAULT_TIMEOUT | pip_retries: $TB_PIP_RETRIES"
+  echo "[INFO] pip_index_url: ${PIP_INDEX_URL:-<default>} | pip_timeout: $TB_PIP_DEFAULT_TIMEOUT | pip_retries: $TB_PIP_RETRIES"
   echo "[INFO] api_base: ${TB_API_BASE:-<empty>}"
   echo "[INFO] timeout_multiplier: $TB_TIMEOUT_MULTIPLIER | agent_setup_timeout_multiplier: $TB_AGENT_SETUP_TIMEOUT_MULTIPLIER"
   echo "[INFO] disallowed_tools: $TB_DISALLOWED_TOOLS"
@@ -950,23 +950,32 @@ PY
       fi
     done
 
-    if [[ -n "${TB_PIP_INDEX_URL:-}" ]]; then
-      cmd+=( --ae "PIP_INDEX_URL=$TB_PIP_INDEX_URL" )
+    if [[ -n "${PIP_INDEX_URL:-}" ]]; then
+      cmd+=( --ae "PIP_INDEX_URL=$PIP_INDEX_URL" --ve "PIP_INDEX_URL=$PIP_INDEX_URL" )
     fi
-    if [[ -n "${TB_PIP_TRUSTED_HOST:-}" ]]; then
-      cmd+=( --ae "PIP_TRUSTED_HOST=$TB_PIP_TRUSTED_HOST" )
+    if [[ -n "${PIP_EXTRA_INDEX_URL:-}" ]]; then
+      cmd+=( --ae "PIP_EXTRA_INDEX_URL=$PIP_EXTRA_INDEX_URL" --ve "PIP_EXTRA_INDEX_URL=$PIP_EXTRA_INDEX_URL" )
     fi
-    if [[ -n "${TB_NPM_CONFIG_REGISTRY:-}" ]]; then
-      cmd+=( --ae "NPM_CONFIG_REGISTRY=$TB_NPM_CONFIG_REGISTRY" --ve "NPM_CONFIG_REGISTRY=$TB_NPM_CONFIG_REGISTRY" )
+    if [[ -n "${PIP_TRUSTED_HOST:-}" ]]; then
+      cmd+=( --ae "PIP_TRUSTED_HOST=$PIP_TRUSTED_HOST" --ve "PIP_TRUSTED_HOST=$PIP_TRUSTED_HOST" )
     fi
-    if [[ -n "${TB_GO111MODULE:-}" ]]; then
-      cmd+=( --ae "GO111MODULE=$TB_GO111MODULE" --ve "GO111MODULE=$TB_GO111MODULE" )
+    if [[ -n "${UV_INDEX_URL:-}" ]]; then
+      cmd+=( --ae "UV_INDEX_URL=$UV_INDEX_URL" --ve "UV_INDEX_URL=$UV_INDEX_URL" )
     fi
-    if [[ -n "${TB_GOPROXY:-}" ]]; then
-      cmd+=( --ae "GOPROXY=$TB_GOPROXY" --ve "GOPROXY=$TB_GOPROXY" )
+    if [[ -n "${UV_DEFAULT_INDEX:-}" ]]; then
+      cmd+=( --ae "UV_DEFAULT_INDEX=$UV_DEFAULT_INDEX" --ve "UV_DEFAULT_INDEX=$UV_DEFAULT_INDEX" )
     fi
-    if [[ -n "${TB_GOSUMDB:-}" ]]; then
-      cmd+=( --ae "GOSUMDB=$TB_GOSUMDB" --ve "GOSUMDB=$TB_GOSUMDB" )
+    if [[ -n "${NPM_CONFIG_REGISTRY:-}" ]]; then
+      cmd+=( --ae "NPM_CONFIG_REGISTRY=$NPM_CONFIG_REGISTRY" --ve "NPM_CONFIG_REGISTRY=$NPM_CONFIG_REGISTRY" )
+    fi
+    if [[ -n "${GO111MODULE:-}" ]]; then
+      cmd+=( --ae "GO111MODULE=$GO111MODULE" --ve "GO111MODULE=$GO111MODULE" )
+    fi
+    if [[ -n "${GOPROXY:-}" ]]; then
+      cmd+=( --ae "GOPROXY=$GOPROXY" --ve "GOPROXY=$GOPROXY" )
+    fi
+    if [[ -n "${GOSUMDB:-}" ]]; then
+      cmd+=( --ae "GOSUMDB=$GOSUMDB" --ve "GOSUMDB=$GOSUMDB" )
     fi
     append_rust_package_mirror_env --ae
     append_rust_package_mirror_env --ve

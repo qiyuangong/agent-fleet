@@ -10,8 +10,8 @@
         "request": { "allowPrivateNetwork": true },
         "models": [
           {
-            "id": "{{MODEL_ID}}",
-            "name": "{{MODEL_ID}}",
+            "id": "{{MODEL}}",
+            "name": "{{MODEL}}",
             "api": "openai-completions",
             "reasoning": false,
             "input": ["text"],

@@ -62,7 +62,7 @@ flowchart LR
 # 1. Set up and launch the OpenClaw fleet (3 instances)
 BASE_URL="https://your-openai-compatible-endpoint/v1" \
 API_KEY="$PROVIDER_API_KEY" \
-MODEL_ID="your-model-id" \
+MODEL="your-model-id" \
 ./Agents/Openclaw/scripts/setup.sh 3
 
 # To enable tracing OpenClaw to Opik, build the opik-enabled image first
@@ -74,14 +74,14 @@ MODEL_ID="your-model-id" \
 #   OPIK_PROJECT_NAME="my-project" \
 #   BASE_URL="https://your-openai-compatible-endpoint/v1" \
 #   API_KEY="$PROVIDER_API_KEY" \
-#   MODEL_ID="your-model-id" \
+#   MODEL="your-model-id" \
 #   ./Agents/Openclaw/scripts/setup.sh 3
 
 docker compose -f Agents/Openclaw/docker-compose.yml up -d
 ./Agents/Openclaw/scripts/openclaw-fleet.sh status
 
 # 2. Configure benchmark defaults
-# Usually only MODEL_ID is required here.
+# Usually only MODEL is required here.
 # For local OpenAI-compatible providers, also set PINCHBENCH_MODEL_PROVIDER.
 $EDITOR Tasks/Pinchbench/config/pinchbench.env
 
@@ -117,13 +117,13 @@ Use this example when the OpenClaw gateways should call a local OpenAI-compatibl
 ```bash
 BASE_URL="http://host.docker.internal:8000/v1" \
 API_KEY="dummy" \
-MODEL_ID="local-model-id" \
+MODEL="local-model-id" \
 ./Agents/Openclaw/scripts/setup.sh 1
 
 docker compose -f Agents/Openclaw/docker-compose.yml up -d
 
 # Then set these in Tasks/Pinchbench/config/pinchbench.env:
-# MODEL_ID=local-model-id
+# MODEL=local-model-id
 # PINCHBENCH_MODEL_PROVIDER=vllm
 
 ./Tasks/Pinchbench/scripts/run-parallel-workers.py --instances 1 --suite task_sanity
@@ -172,14 +172,14 @@ Without these mounts and the gateway token, the worker would run against differe
 
 The runner reads defaults from [`config/pinchbench.env`](./config/pinchbench.env), shared infrastructure (`BASE_URL`, `API_KEY`, `MODEL`, package mirrors) from the repo-root `config.env` (with private overrides/secrets in the git-ignored `config.local.env`), and fleet-wide values (`COUNT`, `CONFIG_BASE`, `WORKSPACE_BASE`) from `Agents/Openclaw/config/fleet.env`. Environment variables override all of these. Relative paths in `pinchbench.env` are resolved from the repository root.
 
-`MODEL_ID` is required in `pinchbench.env` only when `MODEL` is not already set in the root config. `PINCHBENCH_MODEL_PROVIDER` is required only when the fleet uses a local OpenAI-compatible backend and auto-detection is insufficient (typical values: `vllm`, `sglang`, `openai-compatible`). Everything else is optional.
+`MODEL` is required in `pinchbench.env` only when it is not already set in the root config. `PINCHBENCH_MODEL_PROVIDER` is required only when the fleet uses a local OpenAI-compatible backend and auto-detection is insufficient (typical values: `vllm`, `sglang`, `openai-compatible`). Everything else is optional.
 
 | Variable | Default | Description |
 |---|---|---|
 | `COUNT` | `4` | Number of instances when `--instances` is omitted |
-| `MODEL_ID` | _(none)_ | Required unless already provided elsewhere in the environment stack |
+| `MODEL` | _(none)_ | Required unless already provided elsewhere in the environment stack |
 | `PINCHBENCH_MODEL_PROVIDER` | `auto` | Provider override for local OpenAI-compatible backends like `vllm` / `sglang` |
-| `JUDGE_MODEL_ID` | _(benchmark.py default)_ | Judge model override |
+| `JUDGE_MODEL` | _(benchmark.py default)_ | Judge model override |
 | `API_KEY` | _(none)_ | Generic provider API key; the runner maps it to PinchBench's expected env var when needed |
 | `OPENROUTER_API_KEY` | _(none)_ | Compatibility env var used by upstream PinchBench; usually you can just set `API_KEY` |
 | `PINCHBENCH_DIR` | `/tmp/pinchbench-skill` | PinchBench checkout path |

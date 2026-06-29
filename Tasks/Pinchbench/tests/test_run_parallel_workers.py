@@ -240,7 +240,7 @@ class BenchmarkCommandTests(unittest.TestCase):
             fleet_env = tmp_path / "fleet.env"
             generated_env = tmp_path / ".env"
             pinchbench_env = tmp_path / "pinchbench.env"
-            fleet_env.write_text("MODEL_ID=test-model\nCOUNT=2\n", encoding="utf-8")
+            fleet_env.write_text("MODEL=test-model\nCOUNT=2\n", encoding="utf-8")
             generated_env.write_text(
                 "TOKEN_1=test-token\nCONTAINER_NAME_PREFIX=fleet\n",
                 encoding="utf-8",
@@ -277,7 +277,7 @@ class BenchmarkCommandTests(unittest.TestCase):
                  mock.patch.dict(self.runner.os.environ, {}, clear=True):
                 config = self.runner.load_runner_config()
 
-        self.assertEqual(config["MODEL_ID"], "shared-model")
+        self.assertEqual(config["MODEL"], "shared-model")
 
     def test_runner_config_resolves_relative_local_repo_url_from_repo_root(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -287,7 +287,7 @@ class BenchmarkCommandTests(unittest.TestCase):
             fleet_env = tmp_path / "fleet.env"
             generated_env = tmp_path / ".env"
             pinchbench_env = tmp_path / "pinchbench.env"
-            fleet_env.write_text("MODEL_ID=test-model\nCOUNT=2\n", encoding="utf-8")
+            fleet_env.write_text("MODEL=test-model\nCOUNT=2\n", encoding="utf-8")
             generated_env.write_text("CONTAINER_NAME_PREFIX=fleet\n", encoding="utf-8")
             pinchbench_env.write_text("PINCHBENCH_REPO_URL=../skills\n", encoding="utf-8")
 

@@ -47,7 +47,7 @@ DEFAULT_PORTS_OFFSET="100" \
 | `COUNT` | `2` | Number of instances (or pass as argument) |
 | `BASE_URL` | _(none)_ | Model provider base URL |
 | `API_KEY` | _(none)_ | Model provider API key |
-| `MODEL_ID` | `default-model` | Model identifier |
+| `MODEL` | `default-model` | Model identifier |
 | `CONFIG_BASE` | `$HOME/openclaw-instances` | Config/state root mounted at `/home/node/openclaw-state` and exposed through `OPENCLAW_STATE_DIR` / `OPENCLAW_CONFIG_PATH` |
 | `WORKSPACE_BASE` | `$HOME/openclaw-workspaces` | Workspace root mounted at `/home/node/workspace` |
 | `NPM_CACHE_DIR` | `$HOME/.npm` | npm cache directory mounted into containers |
@@ -98,7 +98,7 @@ OPIK_PLUGIN=enabled ./Agents/Openclaw/scripts/build-openclaw-image.sh
 OPIK_PLUGIN=enabled \
 OPIK_URL="https://opik.example.com/api/" \
 OPIK_PROJECT_NAME="my-project" \
-BASE_URL="https://api.example.com/v1" API_KEY="sk-xxx" MODEL_ID="nex/nex-n1.1" \
+BASE_URL="https://api.example.com/v1" API_KEY="sk-xxx" MODEL="nex/nex-n1.1" \
 ./Agents/Openclaw/scripts/setup.sh 3
 ```
 
@@ -115,7 +115,7 @@ OPIK_PLUGIN=enabled ./Agents/Openclaw/scripts/build-openclaw-image.sh
 NPM_CONFIG_REGISTRY="https://registry.npmmirror.com" \
 PIP_INDEX_URL="https://pypi.tuna.tsinghua.edu.cn/simple" \
 PIP_TRUSTED_HOST="pypi.tuna.tsinghua.edu.cn" \
-BASE_URL="https://api.example.com/v1" API_KEY="sk-xxx" MODEL_ID="nex/nex-n1.1" \
+BASE_URL="https://api.example.com/v1" API_KEY="sk-xxx" MODEL="nex/nex-n1.1" \
 ./Agents/Openclaw/scripts/setup.sh 3
 ```
 
@@ -128,7 +128,7 @@ The default template disables OpenClaw heartbeats with `agents.defaults.heartbea
 Placeholders:
 - `{{BASE_URL}}` — model provider base URL
 - `{{API_KEY}}` — model provider API key
-- `{{MODEL_ID}}` — model identifier
+- `{{MODEL}}` — model identifier
 - `{{SANDBOX_MODE}}` — default agent sandbox mode
 - `{{HEARTBEAT_EVERY}}` — default heartbeat cadence (`0m` disables heartbeat)
 - `{{EXEC_SECURITY}}` — exec tool security policy
@@ -220,7 +220,7 @@ ansible-playbook -i Agents/Openclaw/config/ansible/inventory.ini \
   Agents/Openclaw/config/ansible/deploy.yml \
   -e base_url="https://api.example.com/v1" \
   -e api_key="sk-xxx" \
-  -e model_id="nex/nex-n1.1" \
+  -e model="nex/nex-n1.1" \
   -e openclaw_image="registry.example.com/openclaw:latest"
 ```
 

@@ -20,7 +20,7 @@ TASK_CONFIG="${TASK_CONFIG:-$BENCH_DIR/config/tasks.json}"
 # Keep model/provider config sourced from config.env or caller env.
 BASE_URL="${BASE_URL:-}"
 API_KEY="${API_KEY:-}"
-MODEL_ID="${MODEL_ID:-}"
+MODEL="${MODEL:-}"
 
 OPENCLAW_UID="${OPENCLAW_UID:-$(id -u)}"
 OPENCLAW_GID="${OPENCLAW_GID:-$(id -g)}"
@@ -56,7 +56,7 @@ Optional env vars:
   CONFIG_BASE, WORKSPACE_BASE, PLUGIN_CACHE_DIR
 
 Provider/fleet vars are read from environment or the repo-root config.env:
-  BASE_URL, API_KEY, MODEL_ID
+  BASE_URL, API_KEY, MODEL
 EOF
 }
 
@@ -155,7 +155,7 @@ env_args=(
 
 if [[ -n "$BASE_URL" ]]; then env_args+=("BASE_URL=$BASE_URL"); fi
 if [[ -n "$API_KEY" ]]; then env_args+=("API_KEY=$API_KEY"); fi
-if [[ -n "$MODEL_ID" ]]; then env_args+=("MODEL_ID=$MODEL_ID"); fi
+if [[ -n "$MODEL" ]]; then env_args+=("MODEL=$MODEL"); fi
 if [[ -n "$COUNT" ]]; then env_args+=("COUNT=$COUNT"); fi
 if [[ -n "${SANDBOX_MODE:-}" ]]; then env_args+=("SANDBOX_MODE=$SANDBOX_MODE"); fi
 if [[ -n "${EXEC_SECURITY:-}" ]]; then env_args+=("EXEC_SECURITY=$EXEC_SECURITY"); fi

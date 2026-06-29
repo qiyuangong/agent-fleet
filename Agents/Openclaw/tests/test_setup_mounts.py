@@ -87,7 +87,7 @@ class OpenClawSetupMountTests(unittest.TestCase):
                 {
                     "BASE_URL": "https://example.invalid/v1",
                     "API_KEY": "test-key",
-                    "MODEL_ID": "test-model",
+                    "MODEL": "test-model",
                     "CONFIG_BASE": str(tmp_path / "config"),
                     "WORKSPACE_BASE": str(tmp_path / "workspace"),
                     "HEARTBEAT_EVERY": "30m",
@@ -120,7 +120,7 @@ class OpenClawSetupMountTests(unittest.TestCase):
                 {
                     "BASE_URL": "https://example.invalid/v1",
                     "API_KEY": "test-key",
-                    "MODEL_ID": "test-model",
+                    "MODEL": "test-model",
                     "CONFIG_BASE": str(tmp_path / "config"),
                     "WORKSPACE_BASE": str(tmp_path / "workspace"),
                     "OPIK_PLUGIN": "enabled",
@@ -174,7 +174,7 @@ class OpenClawSetupMountTests(unittest.TestCase):
                 {
                     "BASE_URL": 'https://example.invalid/v1?name="quoted"&path=a\\b',
                     "API_KEY": 'test"key\\with|pipes',
-                    "MODEL_ID": 'model"with\\slashes',
+                    "MODEL": 'model"with\\slashes',
                     "SANDBOX_MODE": 'mode"quoted',
                     "EXEC_SECURITY": 'deny"quoted',
                     "EXEC_ASK": 'always"quoted',
@@ -196,7 +196,7 @@ class OpenClawSetupMountTests(unittest.TestCase):
             provider = config["models"]["providers"]["default"]
             self.assertEqual(provider["baseUrl"], env["BASE_URL"])
             self.assertEqual(provider["apiKey"], env["API_KEY"])
-            self.assertEqual(provider["models"][0]["id"], env["MODEL_ID"])
+            self.assertEqual(provider["models"][0]["id"], env["MODEL"])
             self.assertEqual(config["agents"]["defaults"]["sandbox"]["mode"], env["SANDBOX_MODE"])
             self.assertEqual(config["tools"]["exec"]["security"], env["EXEC_SECURITY"])
             self.assertEqual(config["tools"]["exec"]["ask"], env["EXEC_ASK"])

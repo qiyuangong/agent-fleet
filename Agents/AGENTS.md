@@ -87,7 +87,7 @@ port `18789 + (N-1)*20`.
 # Opik-enabled image instead:
 OPIK_PLUGIN=enabled ./Agents/Openclaw/scripts/build-openclaw-image.sh
 
-BASE_URL="https://api.example.com/v1" API_KEY="sk-fake" MODEL_ID="your-model-id" \
+BASE_URL="https://api.example.com/v1" API_KEY="sk-fake" MODEL="your-model-id" \
   ./Agents/Openclaw/scripts/setup.sh 3              # generate 3 instances
 
 docker compose -f Agents/Openclaw/docker-compose.yml up -d

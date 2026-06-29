@@ -48,9 +48,5 @@ fi
 eval "$__caller_env"
 unset __caller_env
 
-if [ -z "${MODEL_ID:-}" ] && [ -n "${MODEL:-}" ]; then
-  export MODEL_ID="$MODEL"
-fi
-
 PY="${PYTHON:-python3}"
 exec "$PY" "$SCRIPT_DIR/setup.py" "$@"

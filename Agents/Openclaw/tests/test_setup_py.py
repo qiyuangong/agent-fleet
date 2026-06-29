@@ -33,7 +33,7 @@ def _base_cfg(**overrides):
     cfg = {
         "BASE_URL": "https://api.example.com/v1",
         "API_KEY": "sk-test",
-        "MODEL_ID": "gpt-test",
+        "MODEL": "gpt-test",
         "SANDBOX_MODE": "off",
         "HEARTBEAT_EVERY": "0m",
         "EXEC_SECURITY": "deny",
@@ -63,7 +63,7 @@ class BuildOpenclawConfigTests(unittest.TestCase):
         self.template = json.loads(TEMPLATE_PATH.read_text(encoding="utf-8"))
 
     def test_basic_substitution(self):
-        cfg = _base_cfg(MODEL_ID="my-model")
+        cfg = _base_cfg(MODEL="my-model")
         result = setup.build_openclaw_config(self.template, cfg, token="t0", gw_port=18789)
         provider = result["models"]["providers"]["default"]
         self.assertEqual(provider["baseUrl"], "https://api.example.com/v1")
@@ -119,13 +119,13 @@ class BuildOpenclawConfigTests(unittest.TestCase):
         cfg = _base_cfg(
             BASE_URL='https://example/v1?n="q"&p=a\\b',
             API_KEY='k"with\\slash|pipe',
-            MODEL_ID='m"o\\d|e',
+            MODEL='m"o\\d|e',
         )
         result = setup.build_openclaw_config(self.template, cfg, token="t", gw_port=18789)
         provider = result["models"]["providers"]["default"]
         self.assertEqual(provider["baseUrl"], cfg["BASE_URL"])
         self.assertEqual(provider["apiKey"], cfg["API_KEY"])
-        self.assertEqual(provider["models"][0]["id"], cfg["MODEL_ID"])
+        self.assertEqual(provider["models"][0]["id"], cfg["MODEL"])
 
 
 class RenderComposeServiceTests(unittest.TestCase):

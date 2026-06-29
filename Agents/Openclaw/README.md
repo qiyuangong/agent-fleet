@@ -37,7 +37,7 @@ Each instance is a Docker container with its own config, workspace, gateway toke
 ./Agents/Openclaw/scripts/build-openclaw-image.sh
 
 # Generate 3 instances with your model provider
-BASE_URL="https://api.example.com/v1" API_KEY="sk-xxx" MODEL_ID="nex/nex-n1.1" ./Agents/Openclaw/scripts/setup.sh 3
+BASE_URL="https://api.example.com/v1" API_KEY="sk-xxx" MODEL="nex/nex-n1.1" ./Agents/Openclaw/scripts/setup.sh 3
 
 # Launch
 docker compose -f Agents/Openclaw/docker-compose.yml up -d

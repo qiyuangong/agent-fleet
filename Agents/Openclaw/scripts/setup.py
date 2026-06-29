@@ -91,7 +91,7 @@ def resolve_config(env: dict[str, str], argv: list[str]) -> dict[str, Any]:
         "PIP_TRUSTED_HOST": env.get("PIP_TRUSTED_HOST", ""),
         "CPU_LIMIT": env.get("CPU_LIMIT", "2"),
         "MEM_LIMIT": env.get("MEM_LIMIT", "4G"),
-        "MODEL_ID": env.get("MODEL_ID", "default-model"),
+        "MODEL": env.get("MODEL", "default-model"),
         "CONTAINER_NAME_PREFIX": env.get("CONTAINER_NAME_PREFIX", "openclaw"),
         "DEFAULT_PORTS_OFFSET": env.get("DEFAULT_PORTS_OFFSET", "0"),
         "PORT_STEP": env.get("PORT_STEP", "20"),
@@ -152,7 +152,7 @@ def validate_required(cfg: dict[str, Any]) -> None:
             f"Option 1: set BASE_URL, API_KEY, MODEL in {PROJECT_DIR.parent.parent}/config.env "
             f"(COUNT in {PROJECT_DIR}/config/fleet.env)\n"
             f'Option 2: BASE_URL="https://api.example.com" API_KEY="sk-xxx" '
-            f'MODEL="{cfg["MODEL_ID"]}" {SCRIPT_DIR}/setup.sh {cfg["COUNT"]}'
+            f'MODEL="{cfg["MODEL"]}" {SCRIPT_DIR}/setup.sh {cfg["COUNT"]}'
         )
         raise _ParserError(msg)
 
@@ -202,8 +202,8 @@ def build_openclaw_config(template: dict[str, Any], cfg: dict[str, Any], *, toke
     provider = result["models"]["providers"]["default"]
     provider["baseUrl"] = normalize_base_url(cfg["BASE_URL"])
     provider["apiKey"] = cfg["API_KEY"]
-    provider["models"][0]["id"] = cfg["MODEL_ID"]
-    provider["models"][0]["name"] = cfg["MODEL_ID"]
+    provider["models"][0]["id"] = cfg["MODEL"]
+    provider["models"][0]["name"] = cfg["MODEL"]
 
     defaults = result["agents"]["defaults"]
     defaults["workspace"] = CONTAINER_WORKSPACE_DIR

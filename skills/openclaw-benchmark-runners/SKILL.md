@@ -39,7 +39,7 @@ Typical flow:
 ```bash
 BASE_URL="https://your-openai-compatible-endpoint/v1" \
 API_KEY="$PROVIDER_API_KEY" \
-MODEL_ID="your-model-id" \
+MODEL="your-model-id" \
 ./Agents/Openclaw/scripts/setup.sh 3
 
 docker compose -f Agents/Openclaw/docker-compose.yml up -d

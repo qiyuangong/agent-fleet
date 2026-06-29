@@ -27,7 +27,7 @@ validation checks applied:
 
 ```text
 Use openclaw-fleet-operations to create a 10-instance OpenClaw fleet with
-MODEL_ID=glm-5.1-fp8 and verify all gateways are healthy.
+MODEL=glm-5.1-fp8 and verify all gateways are healthy.
 ```
 
 ```text

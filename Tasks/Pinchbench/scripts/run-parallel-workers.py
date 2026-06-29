@@ -114,20 +114,18 @@ def load_runner_config() -> dict[str, str]:
 
     def shared_model(default: str = "") -> str:
         for source in (fleet_env, config_local_env, config_env):
-            if "MODEL_ID" in source:
-                return source["MODEL_ID"]
             if "MODEL" in source:
                 return source["MODEL"]
         return default
 
     config = {
         "COUNT": fleet_env.get("COUNT", "4"),
-        "MODEL_ID": shared_model(),
+        "MODEL": shared_model(),
         "BASE_URL": shared("BASE_URL"),
         "API_KEY": shared("API_KEY"),
         "PINCHBENCH_MODEL_PROVIDER": "auto",
         "PINCHBENCH_TIMEOUT_MULTIPLIER": "1.0",
-        "JUDGE_MODEL_ID": "",
+        "JUDGE_MODEL": "",
         "PINCHBENCH_DIR": "/tmp/pinchbench-skill",
         "PINCHBENCH_REF": DEFAULT_PINCHBENCH_REF,
         "PINCHBENCH_OUTPUT_DIR": str(BENCH_DIR / ".pinchbench-results-docker"),
@@ -399,10 +397,10 @@ def validate(args: argparse.Namespace, config: dict[str, str]) -> None:
     if args.instances < 1:
         sys.exit("Error: --instances must be at least 1.")
 
-    if not config.get("MODEL_ID"):
+    if not config.get("MODEL"):
         sys.exit(
-            "Error: missing model. Set MODEL in config.env/config.local.env, "
-            "or set MODEL_ID in Tasks/Pinchbench/config/pinchbench.env "
+            "Error: missing model. Set MODEL in config.env/config.local.env "
+            "or Tasks/Pinchbench/config/pinchbench.env "
             "or Agents/Openclaw/config/fleet.env."
         )
 
@@ -985,9 +983,9 @@ def main() -> None:
     base_url = normalize_base_url(config["BASE_URL"])
     openai_api_key = api_key
     openrouter_key = os.environ.get("OPENROUTER_API_KEY", openai_api_key)
-    model = config["MODEL_ID"]
+    model = config["MODEL"]
     model_provider = config.get("PINCHBENCH_MODEL_PROVIDER", "auto")
-    judge = config.get("JUDGE_MODEL_ID", "")
+    judge = config.get("JUDGE_MODEL", "")
     upload_enabled = config_bool(config.get("PINCHBENCH_UPLOAD"), False)
 
     iteration_summaries: list[dict] = []

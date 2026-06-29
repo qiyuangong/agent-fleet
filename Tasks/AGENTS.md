@@ -34,7 +34,7 @@ worker per gateway) and merges results.
 Prereq: a running OpenClaw fleet ([Agents/AGENTS.md](../Agents/AGENTS.md)).
 
 ```bash
-$EDITOR Tasks/Pinchbench/config/pinchbench.env   # usually only MODEL_ID needed
+$EDITOR Tasks/Pinchbench/config/pinchbench.env   # usually only MODEL needed
 API_KEY="$PROVIDER_API_KEY" ./Tasks/Pinchbench/scripts/run-parallel-workers.py --instances 3
 # multiple iterations:
 API_KEY="$PROVIDER_API_KEY" ./Tasks/Pinchbench/scripts/run-parallel-workers.py --instances 3 -n 5

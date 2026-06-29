@@ -3,7 +3,7 @@ small OpenClaw benchmark smoke run.
 
 Before doing anything:
 - Read ./config.env and ./config.local.env if present.
-- Treat config.local.env as private. Use BASE_URL, API_KEY, MODEL_ID or MODEL,
+- Treat config.local.env as private. Use BASE_URL, API_KEY, MODEL,
   Opik values, and other runtime settings from config.local.env or the caller
   environment, but do not print secrets.
 - Load and follow these repo skills:
@@ -12,7 +12,7 @@ Before doing anything:
 
 Requirements:
 1. Verify the LLM endpoint before benchmark use when BASE_URL,
-   API_KEY, and MODEL_ID or MODEL are available.
+   API_KEY, and MODEL are available.
 2. Create or verify an OpenClaw fleet with 10 instances unless config.local.env
    or the caller requests another count.
 3. Use isolated names, prefixes, workspaces, and result directories for the run.

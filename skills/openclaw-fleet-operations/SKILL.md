@@ -24,7 +24,7 @@ per-instance `$CONFIG_BASE/<N>/openclaw.json`, followed by Docker Compose and
    `./Agents/Openclaw/scripts/build-openclaw-image.sh`. Use
    `OPIK_PLUGIN=enabled` only when Opik tracing should be built into the image.
 4. Generate the fleet with `Agents/Openclaw/scripts/setup.sh`. Required model
-   gateway values are `BASE_URL` and `API_KEY`; `MODEL_ID` selects the model.
+   gateway values are `BASE_URL` and `API_KEY`; `MODEL` selects the model.
 5. Start with
    `docker compose -f Agents/Openclaw/docker-compose.yml up -d`.
 6. Operate the fleet with `Agents/Openclaw/scripts/openclaw-fleet.sh` rather

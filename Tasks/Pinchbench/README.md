@@ -170,9 +170,9 @@ Without these mounts and the gateway token, the worker would run against differe
 
 ## Configuration
 
-The runner reads defaults from [`config/pinchbench.env`](./config/pinchbench.env), shared infrastructure (`BASE_URL`, `API_KEY`, `MODEL_ID`, package mirrors) from the repo-root `config.env` (with private overrides/secrets in the git-ignored `config.local.env`), and fleet-wide values (`COUNT`, `CONFIG_BASE`, `WORKSPACE_BASE`) from `Agents/Openclaw/config/fleet.env`. Environment variables override all of these. Relative paths in `pinchbench.env` are resolved from the repository root.
+The runner reads defaults from [`config/pinchbench.env`](./config/pinchbench.env), shared infrastructure (`BASE_URL`, `API_KEY`, `MODEL`, package mirrors) from the repo-root `config.env` (with private overrides/secrets in the git-ignored `config.local.env`), and fleet-wide values (`COUNT`, `CONFIG_BASE`, `WORKSPACE_BASE`) from `Agents/Openclaw/config/fleet.env`. Environment variables override all of these. Relative paths in `pinchbench.env` are resolved from the repository root.
 
-`MODEL_ID` is required unless already set in `config.env`. `PINCHBENCH_MODEL_PROVIDER` is required only when the fleet uses a local OpenAI-compatible backend and auto-detection is insufficient (typical values: `vllm`, `sglang`, `openai-compatible`). Everything else is optional.
+`MODEL_ID` is required in `pinchbench.env` only when `MODEL` is not already set in the root config. `PINCHBENCH_MODEL_PROVIDER` is required only when the fleet uses a local OpenAI-compatible backend and auto-detection is insufficient (typical values: `vllm`, `sglang`, `openai-compatible`). Everything else is optional.
 
 | Variable | Default | Description |
 |---|---|---|

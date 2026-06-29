@@ -15,7 +15,7 @@ Operator-facing reference: configuration, fleet commands, multi-node deployment,
 Set your model gateway in the repo-root `config.env`, then edit `Agents/Openclaw/config/fleet.env` for fleet-specific options:
 
 ```bash
-# Set BASE_URL, API_KEY, MODEL_ID in config.env
+# Set BASE_URL, API_KEY, MODEL in config.env
 # Set COUNT and other OpenClaw options in Agents/Openclaw/config/fleet.env
 ./Agents/Openclaw/scripts/setup.sh
 ```

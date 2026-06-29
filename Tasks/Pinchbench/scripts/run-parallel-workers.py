@@ -112,9 +112,17 @@ def load_runner_config() -> dict[str, str]:
                 return source[key]
         return default
 
+    def shared_model(default: str = "") -> str:
+        for source in (fleet_env, config_local_env, config_env):
+            if "MODEL_ID" in source:
+                return source["MODEL_ID"]
+            if "MODEL" in source:
+                return source["MODEL"]
+        return default
+
     config = {
         "COUNT": fleet_env.get("COUNT", "4"),
-        "MODEL_ID": shared("MODEL_ID"),
+        "MODEL_ID": shared_model(),
         "BASE_URL": shared("BASE_URL"),
         "API_KEY": shared("API_KEY"),
         "PINCHBENCH_MODEL_PROVIDER": "auto",
@@ -393,7 +401,8 @@ def validate(args: argparse.Namespace, config: dict[str, str]) -> None:
 
     if not config.get("MODEL_ID"):
         sys.exit(
-            "Error: missing MODEL_ID. Set it in Tasks/Pinchbench/config/pinchbench.env "
+            "Error: missing model. Set MODEL in config.env/config.local.env, "
+            "or set MODEL_ID in Tasks/Pinchbench/config/pinchbench.env "
             "or Agents/Openclaw/config/fleet.env."
         )
 

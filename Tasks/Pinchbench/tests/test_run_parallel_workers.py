@@ -255,6 +255,30 @@ class BenchmarkCommandTests(unittest.TestCase):
 
         self.assertEqual(config["CONTAINER_NAME_PREFIX"], "fleet")
 
+    def test_runner_config_reads_shared_model_from_root_config(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            config_env = tmp_path / "config.env"
+            config_local_env = tmp_path / "config.local.env"
+            fleet_env = tmp_path / "fleet.env"
+            generated_env = tmp_path / ".env"
+            pinchbench_env = tmp_path / "pinchbench.env"
+            config_env.write_text("MODEL=shared-model\n", encoding="utf-8")
+            config_local_env.write_text("", encoding="utf-8")
+            fleet_env.write_text("COUNT=2\n", encoding="utf-8")
+            generated_env.write_text("", encoding="utf-8")
+            pinchbench_env.write_text("", encoding="utf-8")
+
+            with mock.patch.object(self.runner, "CONFIG_ENV_FILE", config_env), \
+                 mock.patch.object(self.runner, "CONFIG_LOCAL_ENV_FILE", config_local_env), \
+                 mock.patch.object(self.runner, "FLEET_ENV_FILE", fleet_env), \
+                 mock.patch.object(self.runner, "ENV_FILE", generated_env), \
+                 mock.patch.object(self.runner, "PINCHBENCH_ENV_FILE", pinchbench_env), \
+                 mock.patch.dict(self.runner.os.environ, {}, clear=True):
+                config = self.runner.load_runner_config()
+
+        self.assertEqual(config["MODEL_ID"], "shared-model")
+
     def test_runner_config_resolves_relative_local_repo_url_from_repo_root(self):
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)

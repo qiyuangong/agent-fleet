@@ -26,7 +26,7 @@ class OpenClawSetupMountTests(unittest.TestCase):
                 {
                     "BASE_URL": "https://example.invalid/v1",
                     "API_KEY": "test-key",
-                    "MODEL_ID": "test-model",
+                    "MODEL": "test-model",
                     "CONFIG_BASE": str(config_base),
                     "WORKSPACE_BASE": str(workspace_base),
                 }
@@ -65,6 +65,8 @@ class OpenClawSetupMountTests(unittest.TestCase):
 
             config = (config_base / "1" / "openclaw.json").read_text(encoding="utf-8")
             parsed_config = json.loads(config)
+            provider = parsed_config["models"]["providers"]["default"]
+            self.assertEqual(provider["models"][0]["id"], "test-model")
             self.assertIn('"workspace": "/home/node/workspace"', config)
             self.assertEqual(parsed_config["agents"]["defaults"]["heartbeat"]["every"], "0m")
             self.assertIn('"allow": [', config)

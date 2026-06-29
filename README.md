@@ -37,6 +37,7 @@ vim config.local.env
 Set your model gateway, Opik endpoint, and package mirrors there:
 
 ```bash
+# Required vars
 BASE_URL=https://your-openai-compatible-endpoint
 API_KEY=your-api-key
 MODEL=your-model-id

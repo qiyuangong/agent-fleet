@@ -2,13 +2,63 @@
 
 SII Agent Fleet provides runnable agent integrations and benchmark task lists for Harbor-based evaluation. The main supported Harbor agents are Claude Code and OpenCode.
 
-## Prerequisites
+## Quick Start
+
+```bash
+# 1. Clone (with Opik plugin submodule)
+git clone --recurse-submodules https://github.com/sii-system/sii-agent-fleet.git
+cd sii-agent-fleet
+
+# 2. One-shot setup (installs Node + Claude Code, writes config, installs skills)
+./scripts/setup.sh
+
+# 3. Run a benchmark
+./scripts/run_fleet.sh harbor    # Harbor smoke test (SETA + Terminal-Bench-2)
+./scripts/run_fleet.sh openclaw  # OpenClaw fleet + PinchBench + ClawBio smoke
+```
+
+> [!NOTE]
+> Step 2 will interactively prompt for `BASE_URL`, `AUTH_TOKEN`, and `MODEL`.
+> Reopen your terminal (`source ~/.bashrc`) after setup completes before running step 3.
+
+<details>
+<summary>Prerequisites</summary>
 
 * Docker + Docker Compose v2
 * Python >= 3.9
-* git
-* zellij
-* Others: npm, jq, openssl
+* git, curl, jq, openssl
+* tmux (used by `run_fleet.sh` for persistent sessions)
+* zellij (used by the Harbor runner's interactive mode)
+
+`setup.sh` can install Node.js and Claude Code for you; the tools above must
+be installed manually before running setup.
+
+</details>
+
+<details>
+<summary>Manual setup (without setup.sh)</summary>
+
+If you prefer to configure everything manually instead of using `setup.sh`:
+
+```bash
+cp config.env config.local.env
+vim config.local.env   # set BASE_URL, API_KEY, MODEL, OPIK_URL
+```
+
+Required values in `config.local.env`:
+
+```bash
+BASE_URL=https://your-openai-compatible-endpoint   # WITHOUT /v1
+API_KEY=your-api-key
+MODEL=your-model-id
+OPIK_URL=http://your-opik-host/api
+```
+
+Install Claude Code and skills plugin manually, then run `run_fleet.sh`.
+
+</details>
+
+---
 
 ## Quick Start: Harbor
 
@@ -80,9 +130,7 @@ Attach to a detached session with the name printed by `start.sh`:
 zellij attach <session-name>
 ```
 
-## Supported Harbor Datasets
-
-Configure the dataset in `env.sh`:
+### Supported Harbor Datasets
 
 | Dataset | `DATASET_NAME` | Typical `DATASET_PATH` |
 | --- | --- | --- |
@@ -91,48 +139,22 @@ Configure the dataset in `env.sh`:
 | Terminal-Bench 2.1 | `terminalbench21` | `/workspace/terminal-bench-2-1/tasks` |
 | SWE-bench Verified | `sweverify` | `/workspace/swebench-verified` |
 
+---
+
 ## Use Skills to Operate Fleet/Benchmark
 
-0. Prerequisites:
-* Login to the target server.
-* Set up a code agent such as Claude Code, OpenCode, or Pi.
+See [skills/README.md](./skills/README.md) for using e2e prompt files directly
+with Claude Code, OpenCode, or Pi.
 
-1. Install or load the skills for your code agent according to [Install Skills](./skills/README.md#install-skills).
+> [!TIP]
+> `scripts/run_fleet.sh harbor|openclaw` wraps the skill-based flow with
+> automatic env loading, version pinning, and tmux session management.
 
-2. Configure private runtime values when needed:
-
-```bash
-cp config.env config.local.env
-vim config.local.env
-```
-
-3. Prompt the code agent to operate the fleet or run benchmarks on the target server.
-
-   > [!NOTE]
-   > The e2e prompt examples usually take 10-20 minutes, depending on environment readiness.
-   > Use a persistent terminal session such as `tmux` or `zellij` so the run can continue if the connection drops.
-
-```bash
-PROMPT_FILE=./skills/e2e-harbor-benchmark.txt
-# PROMPT_FILE=./skills/e2e-openclaw-benchmark.txt
-
-# Claude Code: run the selected prompt file.
-claude --no-session-persistence --permission-mode bypassPermissions --tools default -p "$(cat "$PROMPT_FILE")"
-
-# OpenCode: run the selected prompt file.
-opencode run --dangerously-skip-permissions "$(cat "$PROMPT_FILE")"
-
-# Pi: run the selected prompt file.
-pi --no-session --approve --tools read,bash,edit,write,grep,find,ls -p "$(cat "$PROMPT_FILE")"
-```
-
-These prompts have been verified with GLM-5.1:
-
-- [`e2e-openclaw-benchmark.txt`](./skills/e2e-openclaw-benchmark.txt) — set up the OpenClaw fleet and run OpenClaw benchmark smoke tests
-- [`e2e-harbor-benchmark.txt`](./skills/e2e-harbor-benchmark.txt) — run Harbor benchmark smoke tests
+---
 
 ## More Details
 
+- Scripts (setup.sh / run_fleet.sh): [scripts/README.md](./scripts/README.md)
 - Repository structure: [STRUCT.md](./STRUCT.md)
 - Harbor runner details and variables: [Agents/utils/common/Harbor/STRUCT.md](./Agents/utils/common/Harbor/STRUCT.md)
 - Harbor Claude Code integration: [Agents/Harbor-claude-code/STRUCT.md](./Agents/Harbor-claude-code/STRUCT.md)

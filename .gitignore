@@ -25,6 +25,7 @@ Tasks/Pinchbench/.pinchbench-results-docker/
 Tasks/Pinchbench/.uv-cache/
 Tasks/clawBio/cache/
 Tasks/clawBio/results/
+scripts/logs/
 
 # Logs
 *.log

@@ -211,14 +211,18 @@ def _patch_claude_code_realtime_hooks() -> None:
         #   exec_as_root: keep the task image's apt sources intact and only
         #                 force IPv4. Rewriting http apt mirrors to https breaks
         #                 some task containers that do not have trusted CA roots.
-        #   exec_as_agent: the Claude Code install command (curl claude.ai/install.sh)
-        #                  is replaced with npm, because claude.ai is region-blocked
+        #   exec_as_agent: the Claude Code install command (curl downloads.claude.ai/.../bootstrap.sh)
+        #                  is replaced with npm, because downloads.claude.ai is region-blocked
         #                  on SII servers and returns an HTML page instead of a shell
         #                  script, causing "syntax error near unexpected token '<'".
         import re as _re
 
         def _make_claude_install_command(command: str) -> str:
             m = _re.search(r"@anthropic-ai/claude-code@([\d][^\s'\";]*)", command)
+            if not m:
+                # Harbor's bootstrap.sh install passes the version as
+                # "bash -s -- 2.1.90" rather than in the npm spec format.
+                m = _re.search(r"bash -s --\s+([\d][^\s'\";]*)", command)
             version_suffix = f"@{m.group(1)}" if m else ""
             npm_prefix = (
                 f"NPM_CONFIG_REGISTRY={shlex.quote(npm_registry)} "
@@ -325,7 +329,7 @@ def _patch_claude_code_realtime_hooks() -> None:
         async def _exec_as_agent_install_fix(
             _self, environment, command=None, env=None, cwd=None, timeout_sec=None,
         ):
-            if command and "claude.ai/install.sh" in command:
+            if command and ("claude.ai/install.sh" in command or "downloads.claude.ai/claude-code-releases/bootstrap.sh" in command):
                 command = _make_claude_install_command(command)
             return await original_exec_as_agent(
                 environment, command=command, env=env, cwd=cwd, timeout_sec=timeout_sec,

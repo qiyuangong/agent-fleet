@@ -4,25 +4,13 @@ SII Agent Fleet provides runnable agent integrations and benchmark task lists fo
 
 ## Quick Start
 
-```bash
-# 1. Clone (with Opik plugin submodule)
-git clone --recurse-submodules https://github.com/sii-system/sii-agent-fleet.git
-cd sii-agent-fleet
+**Where to run:** a Linux host (or VM) with Docker installed and network
+access to your OpenAI-compatible LLM gateway. Both `setup.sh` and
+`run_fleet.sh` run on this host; benchmarks are launched as Docker containers.
 
-# 2. One-shot setup (installs Node + Claude Code, writes config, installs skills)
-./scripts/setup.sh
+### Step 0 — Prerequisites
 
-# 3. Run a benchmark
-./scripts/run_fleet.sh harbor    # Harbor smoke test (SETA + Terminal-Bench-2)
-./scripts/run_fleet.sh openclaw  # OpenClaw fleet + PinchBench + ClawBio smoke
-```
-
-> [!NOTE]
-> Step 2 will interactively prompt for `BASE_URL`, `AUTH_TOKEN`, and `MODEL`.
-> Reopen your terminal (`source ~/.bashrc`) after setup completes before running step 3.
-
-<details>
-<summary>Prerequisites</summary>
+Install these manually before you begin:
 
 * Docker + Docker Compose v2
 * Python >= 3.9
@@ -33,7 +21,42 @@ cd sii-agent-fleet
 `setup.sh` can install Node.js and Claude Code for you; the tools above must
 be installed manually before running setup.
 
-</details>
+### Step 1 — Clone (with Opik plugin submodule)
+
+```bash
+git clone --recurse-submodules https://github.com/sii-system/sii-agent-fleet.git
+cd sii-agent-fleet
+```
+
+### Step 2 — One-shot setup
+
+```bash
+# Installs Node + Claude Code, writes config.local.env, installs skills plugin
+./scripts/setup.sh
+```
+
+`setup.sh` will interactively prompt for:
+
+* `BASE_URL` — your OpenAI-compatible LLM gateway URL (without `/v1`)
+* `API_KEY` — API key for that gateway
+* `MODEL` — model id to evaluate (e.g. `glm-5.1-fp8`)
+
+Reopen your terminal (`source ~/.bashrc`) after setup completes so the new
+environment variables take effect before running step 3.
+
+### Step 3 — Launch a fleet run
+
+```bash
+./scripts/run_fleet.sh harbor    # Harbor smoke test (SETA + Terminal-Bench-2)
+./scripts/run_fleet.sh openclaw  # OpenClaw fleet + PinchBench + ClawBio smoke
+```
+
+> [!TIP]
+> To change the model, agent, dataset, or concurrency, override via env vars
+> (e.g. `MODEL=... TOTAL_WORKERS=4 ./scripts/run_fleet.sh harbor`) or edit
+> `config.local.env`. The Harbor runner also reads `Agents/utils/common/Harbor/env.sh`
+> for `AGENT`, `DATASET_NAME`, `TOTAL_WORKERS`, etc. See
+> [scripts/README.md](./scripts/README.md) for the full override list.
 
 <details>
 <summary>Manual setup (without setup.sh)</summary>

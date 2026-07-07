@@ -43,6 +43,16 @@ add_opik_build_arg PIP_EXTRA_INDEX_URL
 add_opik_build_arg PIP_TRUSTED_HOST
 add_opik_build_arg NPM_CONFIG_REGISTRY
 
+docker_build_load() {
+  local tag="$1"
+  shift
+  if docker buildx version >/dev/null 2>&1; then
+    docker buildx build --load -t "$tag" "$@"
+  else
+    docker build -t "$tag" "$@"
+  fi
+}
+
 update_npmrc_mirror() {
   local repo_dir="$1"
   local npmrc="$repo_dir/.npmrc"
@@ -103,7 +113,7 @@ fi
 
 # ── Step 2: Build openclaw:local ──
 echo "Building openclaw:local..."
-docker buildx build --load -t openclaw:local "$OPENCLAW_CACHE"
+docker_build_load openclaw:local "$OPENCLAW_CACHE"
 
 echo ""
 echo "Done. Image: openclaw:local"
@@ -125,9 +135,8 @@ fi
 
 # ── Step 4: Build openclaw:local-opik ──
 echo "Building openclaw:local-opik..."
-docker buildx build --load \
+docker_build_load openclaw:local-opik \
   "${OPIK_DOCKER_BUILD_ARGS[@]}" \
-  -t openclaw:local-opik \
   -f "$PROJECT_DIR/Dockerfile.opik" \
   "$REPO_ROOT"
 

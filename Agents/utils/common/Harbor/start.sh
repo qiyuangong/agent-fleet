@@ -4,7 +4,6 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export RUN_ID="${RUN_ID:-$(date +%Y-%m-%d-%H%M)-harbor-tui}"
 . "$SCRIPT_DIR/env.sh"
-harbor_validate_agent
 
 DETACH_MODE=false
 if [[ "${1:-}" == "--detach" ]]; then
@@ -12,8 +11,20 @@ if [[ "${1:-}" == "--detach" ]]; then
   shift
 fi
 
-# Default both interactive and detached zellij session names to the Opik project.
-ZELLIJ_SESSION_NAME="${ZELLIJ_SESSION_NAME:-$OPIK_PROJECT_NAME}"
+# Explicit names still win for normal benchmark zellij sessions.
+ZELLIJ_SESSION_NAME="${ZELLIJ_SESSION_NAME:-${RL_ZELLIJ_SESSION_NAME:-$OPIK_PROJECT_NAME}}"
+
+harbor_stop_rollout_zellij_sessions() {
+  local session
+  while IFS= read -r session; do
+    case "$session" in
+      harbor-rollout-*)
+        zellij kill-session "$session" >/dev/null 2>&1 || true
+        zellij delete-session "$session" >/dev/null 2>&1 || true
+        ;;
+    esac
+  done < <(zellij list-sessions --short 2>/dev/null || true)
+}
 
 ensure_zellij_web_sharing_config() {
   local config_file="${ZELLIJ_CONFIG_FILE:-$HOME/.config/zellij/config.kdl}"
@@ -51,26 +62,55 @@ harbor_start_online_analysis_if_enabled() {
 }
 
 harbor_init_run_dirs
-harbor_ensure_dataset
+if [[ "$ROLLOUT" != "1" ]]; then
+  harbor_validate_agent
+  harbor_ensure_dataset
+else
+  mkdir -p "$RL_TRIALS_DIR" "$RL_ACTIVE_DIR" "$RL_QUEUE_DIR/pending" "$RL_QUEUE_DIR/results" "$RL_JOB_QUEUE_ROOT" "$RL_JOB_RUNTIME_ROOT" "$(dirname "$RL_TRACE_LOG")"
+  touch "$RL_TRACE_LOG"
+fi
 if [[ "${RESET_RUN:-0}" == "1" ]]; then
-  zellij kill-session "$ZELLIJ_SESSION_NAME" >/dev/null 2>&1 || true
-  zellij delete-session "$ZELLIJ_SESSION_NAME" >/dev/null 2>&1 || true
+  if [[ "$ROLLOUT" == "1" ]]; then
+    "$RL_UTILS_DIR/run_rl_rollout_server.sh" --stop >/dev/null 2>&1 || true
+    harbor_stop_rollout_zellij_sessions
+  else
+    zellij kill-session "$ZELLIJ_SESSION_NAME" >/dev/null 2>&1 || true
+    zellij delete-session "$ZELLIJ_SESSION_NAME" >/dev/null 2>&1 || true
+  fi
   harbor_reset_run_state
+  if [[ "$ROLLOUT" == "1" ]]; then
+    rm -rf "$RL_JOB_QUEUE_ROOT" "$RL_JOB_RUNTIME_ROOT" 2>/dev/null || true
+    mkdir -p "$RL_JOB_QUEUE_ROOT" "$RL_JOB_RUNTIME_ROOT"
+    rm -f "$RL_ACTIVE_DIR"/*.json "$RL_QUEUE_DIR"/pending/*.json "$RL_QUEUE_DIR"/results/*.json "$RL_TRACE_LOG" "$RL_SERVER_LOG" 2>/dev/null || true
+    touch "$RL_TRACE_LOG"
+  fi
 fi
 
 if [[ $# -gt 0 ]]; then
-  if ! harbor_uses_registry_dataset; then
+  if [[ "$ROLLOUT" != "1" ]] && ! harbor_uses_registry_dataset; then
     harbor_prepare_task_file
   fi
-  harbor_start_online_analysis_if_enabled
+  if [[ "$ROLLOUT" != "1" ]]; then
+    harbor_start_online_analysis_if_enabled
+  fi
   exec "$@"
 fi
 
-if ! harbor_uses_registry_dataset; then
+if [[ "$ROLLOUT" != "1" ]] && ! harbor_uses_registry_dataset; then
   harbor_prepare_task_file
 fi
-harbor_start_online_analysis_if_enabled
+if [[ "$ROLLOUT" != "1" ]]; then
+  harbor_start_online_analysis_if_enabled
+fi
 cd "$SCRIPT_DIR"
+
+if [[ "$ROLLOUT" == "1" ]]; then
+  if [[ "$DETACH_MODE" == "true" ]]; then
+    exec "$RL_UTILS_DIR/run_rl_rollout_server.sh" --detach
+  fi
+  exec "$RL_UTILS_DIR/run_rl_rollout_server.sh"
+fi
+
 if harbor_uses_registry_dataset; then
   "$SCRIPT_DIR/gen_harbor_registry_zellij_layout.sh" "$LAYOUT_FILE"
 else

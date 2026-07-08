@@ -1,6 +1,8 @@
 # Harbor Common Structure
 
 This directory contains shared Harbor orchestration code. It does not own task lists or agent-specific integration code.
+RL rollout implementation lives in `Agents/utils/rl`; this directory only
+keeps the shared entry point and Harbor runner wrappers.
 
 ## Files
 
@@ -17,6 +19,18 @@ Agents/utils/common/Harbor/
 ├── harbor_worker_utils.py
 └── scripts/
     └── online_rule_analyzer.py # Optional console-only online analysis
+```
+
+```text
+Agents/utils/rl/
+├── RL-env.sh                         # RL rollout defaults
+├── rollout_remote_harbor.py          # Miles/Polar-compatible HTTP listener
+├── run_rl_rollout_server.sh          # Listener lifecycle wrapper
+├── ensure_rl_job_zellij.sh           # Per-ray-job zellij launcher
+├── gen_rl_rollout_zellij_layout.sh   # Per-job zellij layout generator
+├── monitor_rl_rollout.sh             # RL job monitor pane
+├── run_rl_rollout_worker.sh          # Queue worker that reuses harboropik.sh
+└── rl_dataset_worklist.py            # Dataset-to-task-list helper
 ```
 
 ## Path Resolution
@@ -90,6 +104,37 @@ Typical dataset paths:
 | `HARBOR_ONLINE_ANALYSIS` | Enables console-only online analysis, default `0` |
 | `HARBOR_EARLY_STOP` | Stops the current SETA task on matching task-blocking online-analysis events when set to `1`, default `0` |
 
+## RL Rollout Variables
+
+Set `ROLLOUT=1` to start the remote Harbor service instead of a fixed dataset
+zellij run.  `env.sh` then sources `Agents/utils/rl/RL-env.sh` through
+`RL_ENV_FILE`.
+
+| Variable | Purpose |
+| --- | --- |
+| `RL_UTILS_DIR` | Directory containing rollout scripts, defaults to `Agents/utils/rl` |
+| `RL_ENV_FILE` | Optional rollout config file, defaults to `$RL_UTILS_DIR/RL-env.sh` |
+| `RL_HOST` / `RL_PORT` | Listener address for `/health`, `/datasets`, and `/run_trial` |
+| `RL_DATASET_NAME` | Default dataset name exposed to RL callers |
+| `RL_DATASET_ROOT` | Default dataset root used to resolve task ids |
+| `RL_DATASET_ROOTS` | Comma-separated `name=path` aliases for additional datasets |
+| `RL_AGENT` | Agent used by rollout workers, normally `claude-code` or `opencode` |
+| `RL_MODEL_NAME` | Model name used when a request does not provide one |
+| `RL_API_BASE` / `RL_API_KEY` | Model gateway defaults for rollout requests |
+| `RL_MODEL_INFO` / `RL_MAX_NEW_TOKENS` | Harbor model/token budgets applied to rollout tasks |
+| `RL_MAX_TURNS` | Mapped to Harbor `max_turns` for claude-code rollout tasks |
+| `RL_FORCE_BUILD` | Mapped to `TB_FORCE_BUILD`; request `force_build` can override it |
+| `RL_AGENT_TIMEOUT_MULTIPLIER` | Mapped to Harbor's agent timeout multiplier |
+| `RL_LLM_TIMEOUT` / `RL_LLM_MAX_RETRIES` | Mapped into `llm_kwargs.timeout` and `llm_kwargs.max_retries` |
+| `RL_TEMPERATURE` / `RL_TOP_P` / `RL_TOP_K` / `RL_MIN_P` | Mapped into rollout `llm_kwargs` sampling fields |
+| `RL_COLLECT_ROLLOUT_DETAILS` / `RL_ENABLE_SUMMARIZE` | Mapped to claude-code agent kwargs in rollout mode |
+| `RL_MAX_CONCURRENT` / `RL_WORKERS` | Worker count for each per-job zellij session |
+| `RL_QUEUE_DIR` | Shared queue root for rollout requests |
+| `RL_JOB_QUEUE_ROOT` | Per-ray-job queue root |
+| `RL_JOB_RUNTIME_ROOT` | Per-ray-job zellij runtime root |
+| `RL_TRACE_LOG` | JSONL request/result event log with API keys removed |
+| `RL_DYNAMIC_JOB_ZELLIJ` | Create one zellij session per ray job when enabled; rollout requests are rejected if this is disabled without another worker pool |
+
 ## Agent Variables
 
 Claude Code specific defaults:
@@ -142,6 +187,20 @@ OpenCode:
 3. Each worker pane runs `run_harbor_worker.sh`.
 4. Workers claim tasks from the shared queue and call `harboropik.sh`.
 5. `harboropik.sh` prepares Opik/tracing settings and invokes Harbor with either Claude Code or OpenCode.
+
+RL rollout flow:
+
+1. `ROLLOUT=1 start.sh` skips fixed dataset preparation and starts
+   `Agents/utils/rl/run_rl_rollout_server.sh`.
+2. `rollout_remote_harbor.py` accepts `/run_trial`, requires a ray job id,
+   resolves the requested dataset task, and writes one request JSON into the
+   matching per-job queue.
+3. `ensure_rl_job_zellij.sh` creates a `harbor-rollout-<agent>-<dataset>-<ray_job_id>`
+   zellij session for that ray job if one is not already running.
+4. `run_rl_rollout_worker.sh` claims queued requests and calls
+   `Agents/utils/common/Harbor/harboropik.sh`, preserving normal agent logs,
+   local dependency cache behavior, Opik tracing, and timeout finalization.
+5. The worker writes the result JSON; the HTTP request returns that result.
 
 ## Optional Harbor Monitor Diagnostics
 

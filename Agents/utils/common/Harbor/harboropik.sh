@@ -72,6 +72,10 @@ PY
 
 normalize_opik_url_override() {
   local normalized="${OPIK_URL_OVERRIDE%/}"
+  if [[ -z "$normalized" ]]; then
+    echo "[ERROR] OPIK_URL_OVERRIDE/OPIK_URL is empty; set it to an Opik API URL such as http://host:5173/api" >&2
+    exit 1
+  fi
   if [[ "$normalized" != */api ]]; then
     OPIK_URL_OVERRIDE="${normalized}/api"
     echo "[WARN] OPIK_URL_OVERRIDE missing /api, auto-normalized to: $OPIK_URL_OVERRIDE"
@@ -543,6 +547,7 @@ PY
     --ak "model_info=$TB_MODEL_INFO"
     --ae "ANTHROPIC_BASE_URL=$TB_ANTHROPIC_BASE_URL"
     --ae "ANTHROPIC_AUTH_TOKEN=$TB_ANTHROPIC_AUTH_TOKEN"
+    --ae "ANTHROPIC_CUSTOM_HEADERS=$TB_ANTHROPIC_CUSTOM_HEADERS"
     --ae "ANTHROPIC_MODEL=$TB_ANTHROPIC_MODEL"
     --ae "ANTHROPIC_DEFAULT_OPUS_MODEL=$TB_ANTHROPIC_DEFAULT_OPUS_MODEL"
     --ae "ANTHROPIC_DEFAULT_SONNET_MODEL=$TB_ANTHROPIC_DEFAULT_SONNET_MODEL"
@@ -591,6 +596,12 @@ PY
 
   if [[ -n "$TB_AK_MAX_TURNS" ]]; then
     cmd+=( --ak "max_turns=$TB_AK_MAX_TURNS" )
+  fi
+  if [[ -n "$TB_AK_COLLECT_ROLLOUT_DETAILS" ]]; then
+    cmd+=( --ak "collect_rollout_details=$TB_AK_COLLECT_ROLLOUT_DETAILS" )
+  fi
+  if [[ -n "$TB_AK_ENABLE_SUMMARIZE" ]]; then
+    cmd+=( --ak "enable_summarize=$TB_AK_ENABLE_SUMMARIZE" )
   fi
 
   local opik_host wheel_host no_proxy_value

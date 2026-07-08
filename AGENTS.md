@@ -53,6 +53,12 @@ cp config.env config.local.env            # put real values in the local copy
   affected suite before committing — commands are in the nested AGENTS.md
   files.
 
+## Pull Requests
+
+When opening a PR, fill the sections from
+[.github/pull_request_template.md](.github/pull_request_template.md): Why the
+change, Summary of the change, and Other details.
+
 ## More Docs
 
 - Repository layout: [STRUCT.md](STRUCT.md)

@@ -3,7 +3,7 @@
 | Script | Purpose |
 | --- | --- |
 | `setup.sh` | One-shot environment bootstrap: installs Node + Claude Code, writes config, installs skills |
-| `run_fleet.sh` | Launch a fleet to run tasks: load config → create tmux → invoke claude agent |
+| `run_fleet.sh` | Routes tasksets to the existing Harbor or OpenClaw runner |
 
 For the end-to-end quick start, see the [root README](../README.md#quick-start).
 
@@ -61,64 +61,48 @@ Safe to re-run.
 
 ## run_fleet.sh
 
-### Usage
+### Direct taskset runs
 
 ```bash
-./scripts/run_fleet.sh --taskset <taskset> [--agent <agent>] [--workers <n>] [options]
+./scripts/run_fleet.sh --taskset <taskset> [--agent <agent>] [--workers <n>] [--dry-run]
 ```
 
-**One-off env overrides** (temporarily switch model/endpoint without editing config files):
-
-```bash
-MODEL=gpt-4o ./scripts/run_fleet.sh --taskset terminalbench21 --agent claude-code --workers 1
-BASE_URL=https://other-gateway.example.com ./scripts/run_fleet.sh --taskset seta
-```
-
-**Prerequisites**: `setup.sh` has been run (or equivalent manual configuration completed).
-
-### Details
-
-<details>
-<summary>Run flow</summary>
-
-1. Parse `--taskset` / `--agent` / `--workers` and validate against the taskset registry
-2. Load `config.env` → `config.local.env` → restore caller env (command-line overrides win)
-3. Derive `ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN` from `BASE_URL` / `API_KEY`
-4. Generate `RUN_ID` (`<taskset>-<timestamp>`)
-5. Print a run summary and (in interactive mode) wait for confirmation
-6. Create a tmux session named after `RUN_ID`
-7. Run `claude --plugin-dir <skills> --permission-mode bypassPermissions -p "<prompt>"` inside tmux
-8. Pipe output via `tee` to `scripts/logs/<RUN_ID>.log`
-
-</details>
-
-<details>
-<summary>tmux operations</summary>
-
-The tmux session is named after `RUN_ID` (e.g. `terminalbench21-0707-153000`).
-
-| Operation | Command |
+| Option | Description |
 | --- | --- |
-| Reattach | `tmux attach -t <RUN_ID>` |
-| Detach | `Ctrl+B` then `D` |
-| Scroll | Mouse wheel |
-| Kill session | `tmux kill-session -t <RUN_ID>` |
+| `--taskset <value>` | Harbor taskset, explicit local path, `pinchbench`, or `clawbio` |
+| `--agent <name>` | Optional Harbor agent override; `openclaw` is accepted for consistent OpenClaw commands |
+| `--workers <n>` | Harbor workers or OpenClaw fleet instances |
+| `--dry-run` | Print the downstream command and environment without running it |
 
-If a session already exists, the script refuses to create a duplicate and prompts you to attach or kill it.
+Examples:
 
-</details>
-
-<details>
-<summary>Logs</summary>
-
+```bash
+./scripts/run_fleet.sh --taskset terminal-bench/terminal-bench-2-1 \
+  --agent claude-code --workers 10
+./scripts/run_fleet.sh --taskset ./my-taskset --agent opencode --workers 2
+./scripts/run_fleet.sh --taskset pinchbench --agent openclaw --workers 10
+./scripts/run_fleet.sh --taskset clawbio --agent openclaw --workers 10
+./scripts/run_fleet.sh --taskset terminal-bench/terminal-bench-2-1 \
+  --agent claude-code --workers 10 --dry-run
 ```
-scripts/logs/<RUN_ID>.log
-```
 
-> **Known issue**: `claude | tee` pipe buffering may leave the log file at 0 bytes.
-> If this happens, check the tmux terminal output or the benchmark result directory.
+`run_fleet.sh` only parses these options, maps them to the selected
+runner, and replaces itself with that runner. It does not generate run IDs,
+create output directories, manage sessions, filter tasks, run preflight checks,
+or translate downstream errors.
 
-</details>
+Harbor tasksets call `Agents/utils/common/Harbor/start.sh`. Local tasksets must
+use an explicit path beginning with `./`, `../`, `/`, or `~/`. Harbor owns its
+configuration, taskset and agent validation, scheduling, Zellij lifecycle,
+tracing, run IDs, outputs, and failures.
+
+The `pinchbench` taskset calls the existing PinchBench parallel
+runner and maps workers to `--instances`; the OpenClaw fleet must already be
+configured and running. The `clawbio` taskset calls the existing
+ClawBio unified launcher and maps workers to `COUNT`. Those runners own setup,
+validation, execution, outputs, and failures. If `--agent` conflicts with an
+OpenClaw taskset, the router prints the requested and actual agents, ignores the
+conflicting value, and continues with OpenClaw.
 
 ---
 
@@ -140,4 +124,4 @@ scripts/logs/<RUN_ID>.log
   ```
 - **Do not commit `config.local.env`**: it contains secrets.
 - **`bypassPermissions` mode**: the agent executes all tool calls automatically; only use in a controlled environment.
-- **SSH disconnects**: run_fleet.sh must run in tmux mode (the default), otherwise a disconnect kills the task.
+- **Sessions and background execution**: use the facilities provided by the selected Harbor or OpenClaw runner. The router does not manage sessions.

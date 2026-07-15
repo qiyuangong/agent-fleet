@@ -18,6 +18,13 @@ Agents/utils/common/Harbor/
 ├── harbor_prepare_runner_cli.py
 ├── harbor_worker_utils.py
 └── scripts/
+    ├── monitor.py              # Monitor CLI entrypoint and path resolution
+    ├── harbor_monitor/
+    │   ├── artifacts.py        # Queue, result, manifest, environment, and state I/O
+    │   ├── classification.py   # Task and benchmark status classification
+    │   ├── evaluator.py        # Compose one monitor sample
+    │   ├── contracts.py        # User, analyzer, and runner output contracts
+    │   └── runner.py           # Control commands, retries, and follow loop
     └── online_rule_analyzer.py # Optional console-only online analysis
 ```
 

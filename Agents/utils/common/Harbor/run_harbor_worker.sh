@@ -152,6 +152,7 @@ run_claimed_task() {
     export TB_N_CONCURRENT=1
     export TB_MAX_RETRIES="$MAX_RETRIES"
     export JOBS_ROOT="$task_jobs_root"
+    export HARBOR_QUEUE_WORKER=1
 
     if harbor_agent_is_opencode; then
       export OPENCODE_VERSION OPENCODE_CONFIG_CONTENT
@@ -202,7 +203,7 @@ while true; do
 
   mkdir -p "$task_jobs_root"
   rm -f "$early_stop_reason_file"
-  printf '%s\t%s\n' "$task_index" "$task_name" > "$CURRENT_FILE"
+  printf '%s\t%s\t%s\n' "$task_index" "$task_name" "$BASHPID" > "$CURRENT_FILE"
   log_msg "starting task ${task_index}: $task_name"
   # Dry-run does not create agent JSONL logs; starting the tailer there leaves
   # a waiting Python process behind after the worker exits.

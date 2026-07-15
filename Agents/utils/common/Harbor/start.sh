@@ -61,6 +61,82 @@ harbor_start_online_analysis_if_enabled() {
   printf '%s\n' "$!" >"$HARBOR_ONLINE_ANALYSIS_PID_FILE"
 }
 
+harbor_start_monitor_if_enabled() {
+  [[ "$HARBOR_MONITOR_ENABLED" == "1" ]] || return 0
+  [[ "$ROLLOUT" != "1" ]] || return 0
+  if ! harbor_uses_registry_dataset && [[ ! -s "$TASK_FILE" ]]; then
+    echo "[ERROR] cannot start Harbor monitor without a materialized task file: $TASK_FILE" >&2
+    return 1
+  fi
+  mkdir -p "$HARBOR_MONITOR_DIR" "$RUNTIME_DIR"
+  (
+  flock 9
+  if [[ -f "$HARBOR_MONITOR_PID_FILE" ]]; then
+    local existing_pid
+    existing_pid="$(cat "$HARBOR_MONITOR_PID_FILE" 2>/dev/null || true)"
+    if [[ -n "$existing_pid" ]] && kill -0 "$existing_pid" >/dev/null 2>&1; then
+      if harbor_monitor_pid_matches_run "$existing_pid"; then
+        exit 0
+      fi
+      echo "[ERROR] refusing to replace unrelated process from $HARBOR_MONITOR_PID_FILE: pid=$existing_pid" >&2
+      exit 1
+    fi
+    rm -f "$HARBOR_MONITOR_PID_FILE"
+  fi
+
+  if harbor_uses_registry_dataset; then
+    : > "$HARBOR_JOB_DIR_FILE"
+    rm -f "$HARBOR_BENCHMARK_EXIT_FILE"
+  fi
+  local -a monitor_args=(
+    --run-dir "$OUTPUT_PATH"
+    --queue-dir "$QUEUE_DIR"
+    --agent "$AGENT"
+    --output "$HARBOR_MONITOR_DIR/monitor-latest.json"
+    --user-report-output "$HARBOR_MONITOR_DIR/user-notify-latest.json"
+    --analyzer-handover-output "$HARBOR_MONITOR_DIR/analyzer-handover-latest.json"
+    --runner-action-output "$HARBOR_MONITOR_DIR/runner-action-latest.json"
+    --follow
+    --interval "$HARBOR_MONITOR_INTERVAL"
+    --startup-grace "$HARBOR_MONITOR_STARTUP_GRACE"
+    --stall-seconds "$HARBOR_MONITOR_STALL_SECONDS"
+    --max-retries "$HARBOR_MONITOR_MAX_RETRIES"
+  )
+  if harbor_uses_registry_dataset; then
+    monitor_args+=(
+      --harbor-job-dir-file "$HARBOR_JOB_DIR_FILE"
+      --harbor-pid-file "$HARBOR_BENCHMARK_PID_FILE"
+      --harbor-exit-file "$HARBOR_BENCHMARK_EXIT_FILE"
+    )
+  else
+    monitor_args+=(--task-file "$TASK_FILE")
+  fi
+  if [[ -n "$HARBOR_MONITOR_CONFIGURED_TIMEOUT" ]]; then
+    monitor_args+=(--configured-timeout "$HARBOR_MONITOR_CONFIGURED_TIMEOUT")
+  fi
+  if [[ -n "$HARBOR_MONITOR_RESTART_CMD" ]]; then
+    monitor_args+=(--restart-cmd "$HARBOR_MONITOR_RESTART_CMD")
+  fi
+  if [[ -n "$HARBOR_MONITOR_STOP_CMD" ]]; then
+    monitor_args+=(--stop-cmd "$HARBOR_MONITOR_STOP_CMD")
+  fi
+  nohup setsid python3 "$SCRIPT_DIR/scripts/monitor.py" "${monitor_args[@]}" 9>&- \
+    >>"$HARBOR_MONITOR_LOG_FILE" 2>&1 &
+  local monitor_pid="$!"
+  printf '%s\n' "$monitor_pid" > "$HARBOR_MONITOR_PID_FILE"
+  for _ in $(seq 1 50); do
+    [[ -f "$HARBOR_MONITOR_DIR/monitor-latest.json" ]] && exit 0
+    if ! kill -0 "$monitor_pid" >/dev/null 2>&1; then
+      echo "[ERROR] Harbor monitor exited during startup; see $HARBOR_MONITOR_LOG_FILE" >&2
+      exit 1
+    fi
+    sleep 0.1
+  done
+  echo "[ERROR] Harbor monitor did not produce a startup sample; see $HARBOR_MONITOR_LOG_FILE" >&2
+  exit 1
+  ) 9>"$RUNTIME_DIR/harbor-monitor.lock"
+}
+
 harbor_init_run_dirs
 if [[ "$ROLLOUT" != "1" ]]; then
   harbor_validate_agent
@@ -92,6 +168,7 @@ if [[ $# -gt 0 ]]; then
   fi
   if [[ "$ROLLOUT" != "1" ]]; then
     harbor_start_online_analysis_if_enabled
+    harbor_start_monitor_if_enabled
   fi
   exec "$@"
 fi
@@ -141,8 +218,15 @@ if [[ "$DETACH_MODE" == "true" ]]; then
     exit 1
   fi
 
+  if ! harbor_start_monitor_if_enabled; then
+    zellij kill-session "$ZELLIJ_SESSION_NAME" >/dev/null 2>&1 || true
+    zellij delete-session "$ZELLIJ_SESSION_NAME" >/dev/null 2>&1 || true
+    exit 1
+  fi
+
   printf '%s\n' "$ZELLIJ_SESSION_NAME"
   exit 0
 fi
 
+harbor_start_monitor_if_enabled
 exec env -u ZELLIJ_SESSION_NAME zellij --session "$ZELLIJ_SESSION_NAME" --new-session-with-layout "$LAYOUT_FILE"

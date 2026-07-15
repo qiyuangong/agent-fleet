@@ -34,6 +34,23 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/env.sh"
 
+harbor_is_native_registry_main() {
+  [[ "$ROLLOUT" != "1" ]] \
+    && harbor_uses_registry_dataset \
+    && [[ "${HARBOR_QUEUE_WORKER:-0}" != "1" ]]
+}
+
+if harbor_is_native_registry_main; then
+  : > "$HARBOR_JOB_DIR_FILE"
+  rm -f "$HARBOR_BENCHMARK_EXIT_FILE"
+  printf '%s\t%s\n' "$BASHPID" "$(awk '{print $22}' "/proc/$BASHPID/stat")" > "$HARBOR_BENCHMARK_PID_FILE"
+  record_harbor_benchmark_exit() {
+    local rc="$?"
+    printf '%s\n' "$rc" > "$HARBOR_BENCHMARK_EXIT_FILE"
+  }
+  trap record_harbor_benchmark_exit EXIT
+fi
+
 online_env_event() {
   if [[ "$HARBOR_ONLINE_ANALYSIS" != "1" ]]; then
     return 0
@@ -451,6 +468,9 @@ run_tb() {
   local job_name out_dir
   job_name="$(date +%Y-%m-%d__%H-%M-%S)"
   out_dir="$effective_jobs_root/$job_name"
+  if harbor_is_native_registry_main; then
+    printf '%s\n' "$out_dir" > "$HARBOR_JOB_DIR_FILE"
+  fi
   mkdir -p "$out_dir"
 
   export OPIK_URL_OVERRIDE
@@ -847,6 +867,9 @@ run_opencode_task() {
   local job_name out_dir
   job_name="$(date +%Y-%m-%d__%H-%M-%S)"
   out_dir="$JOBS_ROOT/$job_name"
+  if harbor_is_native_registry_main; then
+    printf '%s\n' "$out_dir" > "$HARBOR_JOB_DIR_FILE"
+  fi
   mkdir -p "$out_dir"
 
   export OPIK_URL_OVERRIDE OPIK_WORKSPACE OPIK_API_KEY OPIK_PROJECT_NAME

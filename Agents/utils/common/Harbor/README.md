@@ -126,6 +126,55 @@ ROLLOUT=1 . ./env.sh
 python3 "$RL_UTILS_DIR/rollout_remote_harbor.py"
 ```
 
+## Harbor Monitor
+
+`start.sh` automatically starts one monitor for each Harbor benchmark run.
+Set `HARBOR_MONITOR_ENABLED=0` to disable it. The monitor reads Fleet queue
+artifacts for local datasets and Harbor job/trial results for registry datasets.
+
+Equivalent queue monitor command:
+
+```bash
+RUN_DIR="$PWD/runs/example"
+MONITOR_DIR="$RUN_DIR/monitor"
+
+python3 Agents/utils/common/Harbor/scripts/monitor.py \
+  --run-dir "$RUN_DIR" \
+  --agent claude-code \
+  --output "$MONITOR_DIR/monitor-latest.json" \
+  --user-report-output "$MONITOR_DIR/user-notify-latest.json" \
+  --analyzer-handover-output "$MONITOR_DIR/analyzer-handover-latest.json" \
+  --runner-action-output "$MONITOR_DIR/runner-action-latest.json" \
+  --follow --interval 30
+```
+
+Omit `--follow` for one sample. Control commands are optional executable files
+inside `RUN_DIR`; arguments are allowed but shell syntax is not. If absent or
+failed, the action becomes `notify`.
+
+For automatic runs, optional run-local controls can be set with
+`HARBOR_MONITOR_RESTART_CMD` and `HARBOR_MONITOR_STOP_CMD`.
+
+| Output | Used by | Content |
+| --- | --- | --- |
+| `monitor-latest.json` | Debugging | Full state and evidence |
+| `user-notify-latest.json` | User | Objective status and required human action |
+| `analyzer-handover-latest.json` | Analyzer | Tasks requiring deeper analysis |
+| `runner-action-latest.json` | Runner | `wait`, `restart`, `stop`, or `notify`, plus execution result |
+
+All files are refreshed on each sample. The actual action is
+`runner-action-latest.json.type`; the user report filename does not imply
+`notify` was triggered.
+
+| Observed state | Action |
+| --- | --- |
+| Worker active, including `suspected_stalled` | `wait` |
+| Worker active past `--configured-timeout` | `notify` and continue monitoring |
+| Tasks unfinished with no live worker | `restart`; after `--max-retries`, `notify` |
+| Every task has a terminal queue record | `stop` |
+
+Automatic restart is only used when tasks remain and no worker is alive.
+
 ## More Details
 
 Architecture, script roles, task resolution, and full variable descriptions are in [STRUCT.md](./STRUCT.md).

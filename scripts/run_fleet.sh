@@ -6,10 +6,50 @@ REPO_DIR="${REPO_DIR:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 
 usage() {
   cat <<EOF
-Usage: $0 --taskset <taskset> [--agent <agent>] [--workers <n>] [--detach] [--dry-run]
+Usage:
+  $0 --taskset <taskset> [--agent <agent>] [--workers <n>] [--detach] [--dry-run]
+  $0 --spec <file|-> [--detach] [--dry-run]
 
 OpenClaw tasksets: pinchbench, clawbio
 EOF
+}
+
+load_spec() {
+  local source="$1" spec_json
+
+  command -v jq >/dev/null 2>&1 || {
+    printf '[ERROR] jq is required to read FleetSpec JSON\n' >&2
+    return 1
+  }
+  if [[ "$source" == "-" ]]; then
+    spec_json="$(cat)"
+  elif [[ -f "$source" && -r "$source" ]]; then
+    spec_json="$(cat -- "$source")"
+  else
+    printf '[ERROR] FleetSpec is not readable: %s\n' "$source" >&2
+    return 2
+  fi
+
+  if ! spec_json="$(jq -ces '
+    if length == 1 and (.[0] |
+      type == "object" and
+      ((keys - ["agent", "schema_version", "taskset", "workers"]) | length == 0) and
+      (.schema_version == 1) and
+      (.taskset | type == "string" and length > 0 and (test("[[:cntrl:]]") | not)) and
+      ((has("agent") | not) or
+        (.agent | type == "string" and length > 0 and (test("[[:cntrl:]]") | not))) and
+      ((has("workers") | not) or
+        (.workers | type == "number" and . > 0 and . == floor))
+    ) then .[0] else error("invalid FleetSpec") end
+  ' <<<"$spec_json" 2>/dev/null)"; then
+    printf '[ERROR] invalid FleetSpec v1: %s\n' "$source" >&2
+    printf '[ERROR] expected schema_version=1, taskset, optional agent/workers, and no other fields\n' >&2
+    return 2
+  fi
+
+  TASKSET="$(jq -r '.taskset' <<<"$spec_json")"
+  AGENT_ARG="$(jq -r 'if has("agent") then .agent else "" end' <<<"$spec_json")"
+  WORKERS="$(jq -r 'if has("workers") then (.workers | tostring) else "" end' <<<"$spec_json")"
 }
 
 run_command() {
@@ -22,19 +62,31 @@ run_command() {
   exec "$@"
 }
 
-TASKSET="" AGENT_ARG="" WORKERS="" DETACH=0 DRY_RUN=0
+TASKSET="" AGENT_ARG="" WORKERS="" SPEC_SOURCE="" DETACH=0 DRY_RUN=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -t|--taskset) TASKSET="$2"; shift 2 ;;
     -a|--agent) AGENT_ARG="$2"; shift 2 ;;
     -n|--workers) WORKERS="$2"; shift 2 ;;
+    --spec)
+      [[ $# -ge 2 ]] || { printf '[ERROR] --spec requires a file path or -\n' >&2; exit 2; }
+      SPEC_SOURCE="$2"; shift 2
+      ;;
     --detach) DETACH=1; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) usage >&2; exit 2 ;;
   esac
 done
+
+if [[ -n "$SPEC_SOURCE" ]]; then
+  if [[ -n "$TASKSET" || -n "$AGENT_ARG" || -n "$WORKERS" ]]; then
+    printf '[ERROR] --spec cannot be combined with --taskset, --agent, or --workers\n' >&2
+    exit 2
+  fi
+  load_spec "$SPEC_SOURCE"
+fi
 
 [[ -n "$TASKSET" ]] || { usage >&2; exit 2; }
 

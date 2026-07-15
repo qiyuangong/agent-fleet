@@ -27,7 +27,7 @@ MODEL=glm-5.1-fp8 \
 ./scripts/setup.sh
 ```
 
-**Prerequisites**: Manually install `git` / `curl` / `docker` / `python3`. Node and Claude Code do not need to be pre-installed.
+**Prerequisites**: Manually install `git` / `curl` / `jq` / `docker` / `python3`. Node and Claude Code do not need to be pre-installed.
 
 ### Details
 
@@ -65,6 +65,7 @@ Safe to re-run.
 
 ```bash
 ./scripts/run_fleet.sh --taskset <taskset> [--agent <agent>] [--workers <n>] [--detach] [--dry-run]
+./scripts/run_fleet.sh --spec <file|-> [--detach] [--dry-run]
 ```
 
 | Option | Description |
@@ -72,6 +73,7 @@ Safe to re-run.
 | `--taskset <value>` | Harbor taskset, explicit local path, `pinchbench`, or `clawbio` |
 | `--agent <name>` | Optional Harbor agent override; `openclaw` is accepted for consistent OpenClaw commands |
 | `--workers <n>` | Harbor workers or OpenClaw fleet instances |
+| `--spec <file|->` | Read a FleetSpec v1 JSON object from a file or standard input |
 | `--detach` | Start Harbor in its detached Zellij mode; ignored with a warning for OpenClaw tasksets |
 | `--dry-run` | Print the downstream command and environment without running it |
 
@@ -86,6 +88,61 @@ Examples:
 ./scripts/run_fleet.sh --taskset terminal-bench/terminal-bench-2-1 \
   --agent claude-code --workers 10 --dry-run
 ```
+
+### FleetSpec JSON
+
+Create `fleet-spec.json` with any text editor, for example
+`nano fleet-spec.json`, and enter:
+
+```json
+{
+  "schema_version": 1,
+  "taskset": "terminal-bench/terminal-bench-2",
+  "agent": "opencode",
+  "workers": 4
+}
+```
+
+| Field | Required | Value |
+| --- | --- | --- |
+| `schema_version` | Yes | Must be `1` |
+| `taskset` | Yes | Registry ID, explicit local path, `pinchbench`, or `clawbio` |
+| `agent` | No | Agent passed to the selected runner |
+| `workers` | No | Positive integer |
+
+Preview the resolved command, then run it:
+
+```bash
+./scripts/run_fleet.sh --spec ./fleet-spec.json --dry-run
+./scripts/run_fleet.sh --spec ./fleet-spec.json
+```
+
+Automation can generate the same file without string interpolation:
+
+```bash
+jq -n \
+  --arg taskset "terminal-bench/terminal-bench-2" \
+  --arg agent "claude-code" \
+  --argjson workers 2 \
+  '{schema_version: 1, taskset: $taskset, agent: $agent, workers: $workers}' \
+  > fleet-spec.json
+```
+
+To run without creating a file, pass one JSON object on standard input:
+
+```bash
+./scripts/run_fleet.sh --spec - --dry-run <<'JSON'
+{
+  "schema_version": 1,
+  "taskset": "pinchbench",
+  "workers": 2
+}
+JSON
+```
+
+Spec input cannot be combined with `--taskset`, `--agent`, or `--workers`.
+Multiple JSON values, unknown fields, control characters, and invalid values
+are rejected.
 
 `run_fleet.sh` only parses these options, maps them to the selected
 runner, and replaces itself with that runner. It does not generate run IDs,

@@ -1,3 +1,4 @@
+import json
 import os
 import subprocess
 import tempfile
@@ -60,7 +61,7 @@ exit "${STUB_EXIT:-0}"
     def tearDown(self):
         self.temp_dir.cleanup()
 
-    def run_fleet(self, *args, extra_env=None):
+    def run_fleet(self, *args, extra_env=None, input_text=None):
         env = os.environ.copy()
         for name in (
             "AGENT",
@@ -79,6 +80,7 @@ exit "${STUB_EXIT:-0}"
             [str(SCRIPT), *args],
             cwd=self.root,
             env=env,
+            input=input_text,
             text=True,
             capture_output=True,
             check=False,
@@ -197,6 +199,82 @@ exit "${STUB_EXIT:-0}"
                 self.assertIn(f"--detach ignored for taskset: {taskset}", result.stderr)
                 self.assertNotIn("--detach", result.stdout)
 
+    def test_spec_file_matches_direct_dry_run(self):
+        spec = self.root / "fleet-spec.json"
+        spec.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "taskset": "terminal-bench/terminal-bench-2-1",
+                    "agent": "claude-code",
+                    "workers": 3,
+                }
+            ),
+            encoding="utf-8",
+        )
+        direct = self.run_fleet(
+            "--taskset", "terminal-bench/terminal-bench-2-1",
+            "--agent", "claude-code", "--workers", "3", "--dry-run",
+        )
+        from_spec = self.run_fleet("--spec", str(spec), "--dry-run")
+
+        self.assertEqual(from_spec.returncode, 0, from_spec.stderr)
+        self.assertEqual(from_spec.stdout, direct.stdout)
+
+    def test_spec_stdin_routes_to_existing_runner(self):
+        result = self.run_fleet(
+            "--spec",
+            "-",
+            input_text=json.dumps(
+                {"schema_version": 1, "taskset": "pinchbench", "workers": 2}
+            ),
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("runner=pinchbench", result.stdout)
+        self.assertIn("args=--instances 2", result.stdout)
+
+    def test_spec_rejects_invalid_documents(self):
+        invalid_specs = (
+            "not-json",
+            (
+                '{"schema_version":1,"taskset":"pinchbench"}\n'
+                '{"schema_version":1,"taskset":"clawbio"}'
+            ),
+            {},
+            {"schema_version": "1", "taskset": "terminalbench21"},
+            {"schema_version": 2, "taskset": "terminalbench21"},
+            {"schema_version": 1, "taskset": ""},
+            {"schema_version": 1, "taskset": "pinchbench\u0000clawbio"},
+            {"schema_version": 1, "taskset": "terminalbench21", "agent": ""},
+            {"schema_version": 1, "taskset": "terminalbench21", "workers": 0},
+            {"schema_version": 1, "taskset": "terminalbench21", "workers": 1.5},
+            {"schema_version": 1, "taskset": "terminalbench21", "extra": True},
+        )
+        for payload in invalid_specs:
+            with self.subTest(payload=payload):
+                text = payload if isinstance(payload, str) else json.dumps(payload)
+                result = self.run_fleet("--spec", "-", input_text=text)
+                self.assertEqual(result.returncode, 2)
+                self.assertIn("invalid FleetSpec v1", result.stderr)
+
+    def test_spec_rejects_direct_argument_overrides(self):
+        result = self.run_fleet(
+            "--spec", "-", "--agent", "opencode",
+            input_text=json.dumps(
+                {"schema_version": 1, "taskset": "terminalbench21"}
+            ),
+        )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("--spec cannot be combined", result.stderr)
+
+    def test_spec_requires_a_source(self):
+        result = self.run_fleet("--spec")
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("--spec requires", result.stderr)
+
     def test_openclaw_dry_run_prints_each_runner_without_starting_it(self):
         pinchbench = self.run_fleet(
             "--taskset", "pinchbench", "--agent", "openclaw", "--workers", "4",
@@ -223,10 +301,13 @@ exit "${STUB_EXIT:-0}"
         self.assertIn("--agent", result.stdout)
         self.assertIn("--workers", result.stdout)
         self.assertIn("--detach", result.stdout)
+        self.assertIn("--spec", result.stdout)
         self.assertIn("--dry-run", result.stdout)
         self.assertNotRegex(result.stdout, r"--tasks(?:\s|$)")
 
     def test_portal_is_shell_only(self):
+        portal = SCRIPT.read_text(encoding="utf-8")
+        self.assertLessEqual(len(portal.splitlines()), 150)
         self.assertFalse((SCRIPT.parent / "run_fleet.py").exists())
         self.assertFalse((SCRIPT.parent / "run_fleet_legacy.sh").exists())
 

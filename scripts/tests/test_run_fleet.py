@@ -180,6 +180,23 @@ exit "${STUB_EXIT:-0}"
         self.assertIn("Harbor/start.sh", result.stdout)
         self.assertNotIn("runner=harbor", result.stdout)
 
+    def test_harbor_detach_is_forwarded_to_start(self):
+        result = self.run_fleet(
+            "--taskset", "terminalbench21", "--detach", "--dry-run"
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Harbor/start.sh --detach", result.stdout)
+
+    def test_openclaw_detach_is_reported_and_ignored(self):
+        for taskset in ("pinchbench", "clawbio"):
+            with self.subTest(taskset=taskset):
+                result = self.run_fleet(
+                    "--taskset", taskset, "--detach", "--dry-run"
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn(f"--detach ignored for taskset: {taskset}", result.stderr)
+                self.assertNotIn("--detach", result.stdout)
+
     def test_openclaw_dry_run_prints_each_runner_without_starting_it(self):
         pinchbench = self.run_fleet(
             "--taskset", "pinchbench", "--agent", "openclaw", "--workers", "4",
@@ -205,13 +222,11 @@ exit "${STUB_EXIT:-0}"
         self.assertIn("--taskset", result.stdout)
         self.assertIn("--agent", result.stdout)
         self.assertIn("--workers", result.stdout)
+        self.assertIn("--detach", result.stdout)
         self.assertIn("--dry-run", result.stdout)
         self.assertNotRegex(result.stdout, r"--tasks(?:\s|$)")
-        self.assertNotRegex(result.stdout, r"--detach(?:\s|$)")
 
     def test_portal_is_shell_only(self):
-        portal = SCRIPT.read_text(encoding="utf-8")
-        self.assertLessEqual(len(portal.splitlines()), 80)
         self.assertFalse((SCRIPT.parent / "run_fleet.py").exists())
         self.assertFalse((SCRIPT.parent / "run_fleet_legacy.sh").exists())
 

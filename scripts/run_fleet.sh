@@ -6,7 +6,7 @@ REPO_DIR="${REPO_DIR:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 
 usage() {
   cat <<EOF
-Usage: $0 --taskset <taskset> [--agent <agent>] [--workers <n>] [--dry-run]
+Usage: $0 --taskset <taskset> [--agent <agent>] [--workers <n>] [--detach] [--dry-run]
 
 OpenClaw tasksets: pinchbench, clawbio
 EOF
@@ -22,13 +22,14 @@ run_command() {
   exec "$@"
 }
 
-TASKSET="" AGENT_ARG="" WORKERS="" DRY_RUN=0
+TASKSET="" AGENT_ARG="" WORKERS="" DETACH=0 DRY_RUN=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -t|--taskset) TASKSET="$2"; shift 2 ;;
     -a|--agent) AGENT_ARG="$2"; shift 2 ;;
     -n|--workers) WORKERS="$2"; shift 2 ;;
+    --detach) DETACH=1; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) usage >&2; exit 2 ;;
@@ -41,6 +42,9 @@ REQUESTED_AGENT="${AGENT_ARG:-${AGENT:-}}"
 if [[ "$TASKSET" == "pinchbench" || "$TASKSET" == "clawbio" ]] &&
    [[ -n "$REQUESTED_AGENT" && "$REQUESTED_AGENT" != "openclaw" ]]; then
   printf '[WARN] requested agent: %s; taskset: %s; actual agent: openclaw (requested agent ignored)\n' "$REQUESTED_AGENT" "$TASKSET" >&2
+fi
+if (( DETACH )) && [[ "$TASKSET" == "pinchbench" || "$TASKSET" == "clawbio" ]]; then
+  printf '[WARN] --detach ignored for taskset: %s; runner remains in foreground\n' "$TASKSET" >&2
 fi
 
 case "$TASKSET" in
@@ -69,4 +73,9 @@ esac
 [[ -z "$AGENT_ARG" ]] || harbor_env+=("AGENT=$AGENT_ARG" "TB_AGENT=$AGENT_ARG")
 [[ -z "$WORKERS" ]] || harbor_env+=("TOTAL_WORKERS=$WORKERS" "TB_N_CONCURRENT=$WORKERS")
 
-run_command env "${harbor_env[@]}" bash "$REPO_DIR/Agents/utils/common/Harbor/start.sh"
+# Assemble the full command in one always-non-empty array: expanding an
+# empty array under `set -u` is an unbound-variable error on bash < 4.4
+# (macOS /bin/bash 3.2), which broke every run without --detach.
+harbor_cmd=(env "${harbor_env[@]}" bash "$REPO_DIR/Agents/utils/common/Harbor/start.sh")
+(( DETACH )) && harbor_cmd+=(--detach)
+run_command "${harbor_cmd[@]}"

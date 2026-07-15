@@ -64,7 +64,7 @@ Safe to re-run.
 ### Direct taskset runs
 
 ```bash
-./scripts/run_fleet.sh --taskset <taskset> [--agent <agent>] [--workers <n>] [--dry-run]
+./scripts/run_fleet.sh --taskset <taskset> [--agent <agent>] [--workers <n>] [--detach] [--dry-run]
 ```
 
 | Option | Description |
@@ -72,13 +72,14 @@ Safe to re-run.
 | `--taskset <value>` | Harbor taskset, explicit local path, `pinchbench`, or `clawbio` |
 | `--agent <name>` | Optional Harbor agent override; `openclaw` is accepted for consistent OpenClaw commands |
 | `--workers <n>` | Harbor workers or OpenClaw fleet instances |
+| `--detach` | Start Harbor in its detached Zellij mode; ignored with a warning for OpenClaw tasksets |
 | `--dry-run` | Print the downstream command and environment without running it |
 
 Examples:
 
 ```bash
 ./scripts/run_fleet.sh --taskset terminal-bench/terminal-bench-2-1 \
-  --agent claude-code --workers 10
+  --agent claude-code --workers 10 --detach
 ./scripts/run_fleet.sh --taskset ./my-taskset --agent opencode --workers 2
 ./scripts/run_fleet.sh --taskset pinchbench --agent openclaw --workers 10
 ./scripts/run_fleet.sh --taskset clawbio --agent openclaw --workers 10
@@ -88,13 +89,14 @@ Examples:
 
 `run_fleet.sh` only parses these options, maps them to the selected
 runner, and replaces itself with that runner. It does not generate run IDs,
-create output directories, manage sessions, filter tasks, run preflight checks,
-or translate downstream errors.
+create output directories, create or monitor sessions, filter tasks, run
+preflight checks, or translate downstream errors.
 
 Harbor tasksets call `Agents/utils/common/Harbor/start.sh`. Local tasksets must
 use an explicit path beginning with `./`, `../`, `/`, or `~/`. Harbor owns its
 configuration, taskset and agent validation, scheduling, Zellij lifecycle,
-tracing, run IDs, outputs, and failures.
+tracing, run IDs, outputs, and failures. `--detach` is passed directly to
+Harbor's existing Zellij launcher.
 
 The `pinchbench` taskset calls the existing PinchBench parallel
 runner and maps workers to `--instances`; the OpenClaw fleet must already be
@@ -102,7 +104,8 @@ configured and running. The `clawbio` taskset calls the existing
 ClawBio unified launcher and maps workers to `COUNT`. Those runners own setup,
 validation, execution, outputs, and failures. If `--agent` conflicts with an
 OpenClaw taskset, the router prints the requested and actual agents, ignores the
-conflicting value, and continues with OpenClaw.
+conflicting value, and continues with OpenClaw. OpenClaw runners remain in the
+foreground; `--detach` is ignored with a warning.
 
 ---
 

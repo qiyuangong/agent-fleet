@@ -1,7 +1,10 @@
 import json
 import os
+import pty
+import signal
 import subprocess
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -52,6 +55,50 @@ exit "${CLAUDE_STUB_EXIT:-0}"
         )
         claude.chmod(0o755)
 
+        harbor = self.repo / "Agents/utils/common/Harbor/start.sh"
+        harbor.parent.mkdir(parents=True)
+        harbor.write_text(
+            """#!/usr/bin/env bash
+printf 'runner=harbor\\n'
+printf 'DATASET_NAME=%s\\n' "${DATASET_NAME-}"
+printf 'AGENT=%s\\n' "${AGENT-}"
+printf 'TOTAL_WORKERS=%s\\n' "${TOTAL_WORKERS-}"
+printf 'args=%s\\n' "$*"
+printf 'stdin_tty=%s\\n' "$([ -t 0 ] && echo yes || echo no)"
+if [[ -n "${STUB_PIDFILE-}" ]]; then
+  printf '%s\\n' "$$" >"$STUB_PIDFILE"
+  # Detach the sleep from the harness pipes so an orphaned child cannot
+  # hold them open after this process is signalled.
+  sleep 30 </dev/null >/dev/null 2>&1
+fi
+exit "${STUB_EXIT:-0}"
+""",
+            encoding="utf-8",
+        )
+
+        pinchbench = self.repo / "Tasks/Pinchbench/scripts/run-parallel-workers.py"
+        pinchbench.parent.mkdir(parents=True)
+        pinchbench.write_text(
+            """import os
+import sys
+print("runner=pinchbench")
+print("args=" + " ".join(sys.argv[1:]))
+raise SystemExit(int(os.environ.get("STUB_EXIT", "0")))
+""",
+            encoding="utf-8",
+        )
+
+        clawbio = self.repo / "Tasks/clawBio/scripts/run-openclaw-clawbio.sh"
+        clawbio.parent.mkdir(parents=True)
+        clawbio.write_text(
+            """#!/usr/bin/env bash
+printf 'runner=clawbio\\n'
+printf 'COUNT=%s\\n' "${COUNT-}"
+exit "${STUB_EXIT:-0}"
+""",
+            encoding="utf-8",
+        )
+
     def tearDown(self):
         self.temp_dir.cleanup()
 
@@ -75,7 +122,7 @@ exit "${CLAUDE_STUB_EXIT:-0}"
             }
         )
 
-    def run_goal(self, *args, response=None, extra_env=None):
+    def goal_env(self, response=None, extra_env=None):
         env = os.environ.copy()
         for name in (
             "ANTHROPIC_API_KEY",
@@ -100,16 +147,20 @@ exit "${CLAUDE_STUB_EXIT:-0}"
             }
         )
         env.update(extra_env or {})
+        return env
+
+    def run_goal(self, *args, response=None, extra_env=None, stdin=None):
         return subprocess.run(
             [str(SCRIPT), *args],
             cwd=self.root,
-            env=env,
+            env=self.goal_env(response=response, extra_env=extra_env),
             text=True,
             capture_output=True,
             check=False,
+            stdin=stdin,
         )
 
-    def test_goal_writes_fleetspec_without_running_a_benchmark(self):
+    def test_prompt_writes_fleetspec_and_runs_it(self):
         output = self.root / "fleet-spec.json"
         result = self.run_goal(
             "--prompt",
@@ -119,7 +170,11 @@ exit "${CLAUDE_STUB_EXIT:-0}"
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("FleetSpec written", result.stdout)
+        self.assertIn("FleetSpec written", result.stderr)
+        self.assertIn("runner=harbor", result.stdout)
+        self.assertIn("DATASET_NAME=terminal-bench/terminal-bench-2", result.stdout)
+        self.assertIn("AGENT=claude-code", result.stdout)
+        self.assertIn("TOTAL_WORKERS=2", result.stdout)
         self.assertEqual(
             json.loads(output.read_text(encoding="utf-8")),
             {
@@ -130,15 +185,19 @@ exit "${CLAUDE_STUB_EXIT:-0}"
             },
         )
 
-    def test_goal_prints_fleetspec_to_stdout_by_default(self):
+    def test_prompt_runs_openclaw_without_printing_the_spec(self):
         result = self.run_goal("--prompt", "Run pinchbench", response=self.response(
             spec={"schema_version": 1, "taskset": "pinchbench"}
         ))
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(
-            json.loads(result.stdout),
-            {"schema_version": 1, "taskset": "pinchbench"},
+        self.assertIn("runner=pinchbench", result.stdout)
+        self.assertNotIn("schema_version", result.stdout)
+        # The interpreted spec must still be visible on stderr: without it, a
+        # mistranslated prompt starts a runner with no trace of what was asked.
+        self.assertIn(
+            '[INFO] FleetSpec: {"schema_version":1,"taskset":"pinchbench"}',
+            result.stderr,
         )
 
     def test_caller_config_wins_and_goal_is_one_literal_argument(self):
@@ -187,6 +246,7 @@ exit "${CLAUDE_STUB_EXIT:-0}"
         self.assertEqual(result.returncode, 3)
         self.assertIn("Which taskset should be run?", result.stderr)
         self.assertFalse(output.exists())
+        self.assertNotIn("runner=", result.stdout)
 
     def test_ready_translation_with_invalid_spec_is_rejected(self):
         result = self.run_goal(
@@ -197,6 +257,7 @@ exit "${CLAUDE_STUB_EXIT:-0}"
 
         self.assertEqual(result.returncode, 1)
         self.assertIn("invalid FleetSpec v1 candidate", result.stderr)
+        self.assertNotIn("runner=", result.stdout)
 
     def test_ready_translation_with_nonempty_message_is_rejected(self):
         # The envelope contract says ready=true and a question cannot coexist;
@@ -209,10 +270,11 @@ exit "${CLAUDE_STUB_EXIT:-0}"
 
         self.assertEqual(result.returncode, 1)
         self.assertIn("no valid structured Prompt translation", result.stderr)
+        self.assertNotIn("runner=", result.stdout)
 
     def test_integral_float_workers_are_normalized(self):
         # JSON has no int/float distinction; a model-produced 3.0 passes the
-        # integral check but must reach the spec file as 3, never 3.0.
+        # integral check but must reach the runner as 3, never 3.0.
         result = self.run_goal(
             "--prompt",
             "Run pinchbench with 3 workers",
@@ -222,9 +284,9 @@ exit "${CLAUDE_STUB_EXIT:-0}"
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        workers = json.loads(result.stdout)["workers"]
-        self.assertEqual(workers, 3)
-        self.assertIsInstance(workers, int)
+        self.assertIn("runner=pinchbench", result.stdout)
+        self.assertIn("args=--instances 3", result.stdout)
+        self.assertNotIn("3.0", result.stdout)
 
     def test_workers_above_4096_are_rejected(self):
         result = self.run_goal(
@@ -237,6 +299,7 @@ exit "${CLAUDE_STUB_EXIT:-0}"
 
         self.assertEqual(result.returncode, 1)
         self.assertIn("invalid FleetSpec v1 candidate", result.stderr)
+        self.assertNotIn("runner=", result.stdout)
 
     def test_missing_config_fails_before_calling_the_model(self):
         (self.repo / "config.env").unlink()
@@ -251,6 +314,7 @@ exit "${CLAUDE_STUB_EXIT:-0}"
         self.assertEqual(result.returncode, 1)
         self.assertIn("incomplete model configuration", result.stderr)
         self.assertFalse(capture.exists())
+        self.assertNotIn("runner=", result.stdout)
 
     def test_socket_failure_with_proxy_prints_no_proxy_hint(self):
         result = self.run_goal(
@@ -266,12 +330,129 @@ exit "${CLAUDE_STUB_EXIT:-0}"
         self.assertEqual(result.returncode, 1)
         self.assertIn("UND_ERR_SOCKET", result.stderr)
         self.assertIn("add its hostname to NO_PROXY", result.stderr)
+        self.assertNotIn("runner=", result.stdout)
 
     def test_goal_requires_nonempty_text(self):
         result = self.run_goal("--prompt", "   ")
 
         self.assertEqual(result.returncode, 2)
         self.assertIn("must not be empty", result.stderr)
+
+    def test_prompt_dry_run_resolves_command_without_starting_runner(self):
+        result = self.run_goal(
+            "--prompt",
+            "Run terminal-bench/terminal-bench-2 with two workers",
+            "--dry-run",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Command: env", result.stdout)
+        self.assertIn("DATASET_NAME=terminal-bench/terminal-bench-2", result.stdout)
+        self.assertIn("TOTAL_WORKERS=2", result.stdout)
+        self.assertNotIn("runner=harbor", result.stdout)
+
+    def test_prompt_detach_is_forwarded_through_spec_execution(self):
+        result = self.run_goal(
+            "--prompt",
+            "Run terminal-bench/terminal-bench-2",
+            "--detach",
+            "--dry-run",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Harbor/start.sh --detach", result.stdout)
+
+    def test_prompt_returns_downstream_runner_exit_code(self):
+        result = self.run_goal(
+            "--prompt",
+            "Run terminal-bench/terminal-bench-2",
+            extra_env={"STUB_EXIT": "17"},
+        )
+
+        self.assertEqual(result.returncode, 17)
+        self.assertIn("runner=harbor", result.stdout)
+
+    def test_prompt_output_requires_a_file_path_before_model_call(self):
+        capture = self.root / "claude-capture.txt"
+        result = self.run_goal(
+            "--prompt",
+            "Run pinchbench",
+            "--output",
+            "-",
+            extra_env={"CLAUDE_STUB_CAPTURE": str(capture)},
+        )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("file path, not -", result.stderr)
+        self.assertFalse(capture.exists())
+        self.assertNotIn("runner=", result.stdout)
+
+    def test_prompt_output_rejects_option_token_before_model_call(self):
+        # `--output --dry-run` is a mangled preview command; consuming the
+        # token as a filename silently turned it into a live benchmark run.
+        capture = self.root / "claude-capture.txt"
+        result = self.run_goal(
+            "--prompt",
+            "Run pinchbench",
+            "--output",
+            "--dry-run",
+            extra_env={"CLAUDE_STUB_CAPTURE": str(capture)},
+        )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("requires a file path", result.stderr)
+        self.assertFalse(capture.exists())
+        self.assertNotIn("runner=", result.stdout)
+        self.assertFalse((self.root / "--dry-run").exists())
+
+    def test_prompt_foreground_runner_keeps_terminal_stdin(self):
+        # The runner must inherit the caller's terminal on fd 0: foreground
+        # Harbor attaches an interactive Zellij session that reads it.
+        master, slave = pty.openpty()
+        try:
+            result = self.run_goal(
+                "--prompt",
+                "Run terminal-bench/terminal-bench-2 with claude-code and 2 workers",
+                stdin=slave,
+            )
+        finally:
+            os.close(master)
+            os.close(slave)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("stdin_tty=yes", result.stdout)
+        self.assertIn("DATASET_NAME=terminal-bench/terminal-bench-2", result.stdout)
+
+    def test_prompt_cancellation_by_pid_reaches_the_runner(self):
+        # The exec chain must keep the runner on the PID a supervisor knows,
+        # so cancelling that PID stops the benchmark instead of orphaning it.
+        pidfile = self.root / "runner.pid"
+        proc = subprocess.Popen(
+            [str(SCRIPT), "--prompt", "Run terminal-bench/terminal-bench-2"],
+            cwd=self.root,
+            env=self.goal_env(extra_env={"STUB_PIDFILE": str(pidfile)}),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        try:
+            for _ in range(200):
+                if pidfile.exists() and pidfile.read_text().strip():
+                    break
+                time.sleep(0.05)
+            else:
+                proc.kill()
+                self.fail("runner never started")
+
+            self.assertEqual(int(pidfile.read_text()), proc.pid)
+            proc.send_signal(signal.SIGTERM)
+            self.assertEqual(proc.wait(timeout=5), -signal.SIGTERM)
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+            proc.stdout.close()
+            proc.stderr.close()
+            proc.wait()
 
     def test_unsupported_terminus_prompt_does_not_write_a_spec(self):
         output = self.root / "fleet-spec.json"
@@ -290,6 +471,7 @@ exit "${CLAUDE_STUB_EXIT:-0}"
         self.assertEqual(result.returncode, 3)
         self.assertIn("not a supported Harbor agent", result.stderr)
         self.assertFalse(output.exists())
+        self.assertNotIn("runner=", result.stdout)
 
     def test_model_cannot_emit_unsupported_terminus_spec(self):
         result = self.run_goal(
@@ -306,6 +488,7 @@ exit "${CLAUDE_STUB_EXIT:-0}"
 
         self.assertEqual(result.returncode, 1)
         self.assertIn("invalid FleetSpec v1 candidate", result.stderr)
+        self.assertNotIn("runner=", result.stdout)
 
 
 if __name__ == "__main__":

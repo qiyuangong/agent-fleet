@@ -7,14 +7,22 @@ REPO_DIR="${REPO_DIR:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 usage() {
   cat <<EOF
 Usage:
-  $0 --prompt <text> [--output <file|->]
+  $0 --prompt <text> [--output <file>] [--detach] [--dry-run]
 
-Translate one natural-language prompt into FleetSpec v1 JSON. This command does
-not run a benchmark. Output defaults to stdout.
+Translate one natural-language prompt into FleetSpec v1, validate it, and run
+it through the existing FleetSpec execution path. --output optionally saves the
+validated spec before execution.
 EOF
 }
 
 err() { printf '[ERROR] %s\n' "$*" >&2; }
+
+is_recognized_option() {
+  case "$1" in
+    --prompt|--output|--detach|--dry-run|-h|--help) return 0 ;;
+    *) return 1 ;;
+  esac
+}
 
 load_config() {
   local entry file name
@@ -38,7 +46,7 @@ load_config() {
   done
 }
 
-PROMPT="" OUTPUT="-" output_dir=""
+PROMPT="" OUTPUT="" output_dir="" DETACH=0 DRY_RUN=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --prompt)
@@ -46,16 +54,27 @@ while [[ $# -gt 0 ]]; do
       PROMPT="$2"; shift 2
       ;;
     --output)
-      [[ $# -ge 2 ]] || { err "--output requires a file path or -"; exit 2; }
+      [[ $# -ge 2 ]] || { err "--output requires a file path"; exit 2; }
+      # A recognized option token here is a mangled command line, not a
+      # filename; silently consuming it turns an intended preview into a
+      # live run. A file literally named like an option stays expressible
+      # as ./--dry-run.
+      if is_recognized_option "$2"; then
+        err "--output requires a file path; use ./$2 for a file literally named $2"
+        exit 2
+      fi
       OUTPUT="$2"; shift 2
       ;;
+    --detach) DETACH=1; shift ;;
+    --dry-run) DRY_RUN=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) usage >&2; exit 2 ;;
   esac
 done
 
 [[ -n "${PROMPT//[[:space:]]/}" ]] || { err "--prompt must not be empty"; exit 2; }
-if [[ "$OUTPUT" != "-" ]]; then
+if [[ -n "$OUTPUT" ]]; then
+  [[ "$OUTPUT" != "-" ]] || { err "--output requires a file path, not -"; exit 2; }
   output_dir="$(dirname -- "$OUTPUT")"
   [[ -d "$output_dir" ]] || { err "output directory does not exist: $output_dir"; exit 2; }
   [[ ! -d "$OUTPUT" ]] || { err "output path is a directory: $OUTPUT"; exit 2; }
@@ -192,13 +211,34 @@ if ! spec="$(jq -ce -L "$SCRIPT_DIR" '
 fi
 
 formatted="$(jq . <<<"$spec")"
-if [[ "$OUTPUT" == "-" ]]; then
-  printf '%s\n' "$formatted"
-else
+if [[ -n "$OUTPUT" ]]; then
   tmp_file="$(mktemp "$output_dir/.fleet-spec.XXXXXX")"
   trap 'rm -f -- "$tmp_file"' EXIT
   printf '%s\n' "$formatted" >"$tmp_file"
   mv -f -- "$tmp_file" "$OUTPUT"
   trap - EXIT
-  printf '[INFO] FleetSpec written: %s\n' "$OUTPUT"
+  printf '[INFO] FleetSpec written: %s\n' "$OUTPUT" >&2
 fi
+
+# Echo the interpretation before execution: the model may have resolved the
+# prompt differently than the user meant, and a detached runner leaves no
+# other trace of what was requested.
+printf '[INFO] FleetSpec: %s\n' "$(jq -c . <<<"$spec")" >&2
+
+# Hand the spec to the runner on a private descriptor instead of stdin:
+# the foreground Harbor path attaches an interactive Zellij session that
+# still needs the caller's terminal on fd 0. Unlinking after open means the
+# descriptor outlives the file and nothing is left behind in TMPDIR.
+spec_file="$(mktemp "${TMPDIR:-/tmp}/fleet-spec.XXXXXX")"
+trap 'rm -f -- "$spec_file"' EXIT
+printf '%s\n' "$formatted" >"$spec_file"
+exec 3<"$spec_file"
+rm -f -- "$spec_file"
+trap - EXIT
+
+run_args=(--spec /dev/fd/3)
+(( DETACH )) && run_args+=(--detach)
+(( DRY_RUN )) && run_args+=(--dry-run)
+# exec keeps the runner on this PID, matching the direct/spec path: a
+# supervisor that cancels by PID reaches the benchmark, not a wrapper.
+exec bash "$SCRIPT_DIR/run_fleet.sh" "${run_args[@]}"

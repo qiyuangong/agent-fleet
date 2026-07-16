@@ -15,7 +15,7 @@ usage() {
 Usage:
   $0 --taskset <taskset> [--agent <agent>] [--workers <n>] [--detach] [--dry-run]
   $0 --spec <file|-> [--detach] [--dry-run]
-  $0 --prompt <text> [--output <file|->]
+  $0 --prompt <text> [--output <file>] [--detach] [--dry-run]
 
 OpenClaw tasksets: pinchbench, clawbio
 EOF

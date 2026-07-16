@@ -985,7 +985,12 @@ src = sys.argv[1]
 dst = sys.argv[2]
 mounts = []
 if src and os.path.exists(src):
-    mounts.append(f"{src}:{dst}:ro")
+    mounts.append({
+        "type": "bind",
+        "source": src,
+        "target": dst,
+        "read_only": True,
+    })
 print(json.dumps(mounts, ensure_ascii=True))
 PY
     )"

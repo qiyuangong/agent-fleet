@@ -87,6 +87,39 @@ if args[index + 1] != overlay:
 PY
 }
 
+assert_structured_mount_arg() {
+  local capture_file="$1"
+  local source_dir="$2"
+  local target_dir="$3"
+  python3 - "$capture_file" "$source_dir" "$target_dir" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+capture = Path(sys.argv[1])
+source = sys.argv[2]
+target = sys.argv[3]
+args = [part.decode() for part in capture.read_bytes().split(b"\0") if part]
+try:
+    index = args.index("--mounts-json")
+except ValueError:
+    raise SystemExit(f"missing --mounts-json in command: {args!r}")
+if index == len(args) - 1:
+    raise SystemExit(f"--mounts-json is missing its JSON value: {args!r}")
+mounts = json.loads(args[index + 1])
+if not all(isinstance(mount, dict) for mount in mounts):
+    raise SystemExit(f"mounts must be structured objects: {mounts!r}")
+expected = {
+    "type": "bind",
+    "source": source,
+    "target": target,
+    "read_only": True,
+}
+if expected not in mounts:
+    raise SystemExit(f"missing expected mount {expected!r}: {mounts!r}")
+PY
+}
+
 run_harboropik() {
   local agent="$1"
   local capture_bin="$2"
@@ -94,9 +127,12 @@ run_harboropik() {
   local output_dir="$4"
   local fake_bin
   local trace_dir
+  local wheel_dir
   fake_bin="$(dirname "$capture_bin")"
   mkdir -p "$output_dir"
   mkdir -p "$output_dir/run/runtime/$agent"
+  wheel_dir="$output_dir/wheels"
+  mkdir -p "$wheel_dir"
   trace_dir="$output_dir/trace"
   mkdir -p \
     "$trace_dir/src/sii_opik_plugin/claude_code" \
@@ -124,6 +160,7 @@ run_harboropik() {
     TRACE_TO_OPIK="true" \
     TB_TRACE_TO_OPIK="true" \
     TB_CC_OPIK_ENABLE_HOOK="1" \
+    TB_CC_PY_WHEEL_DIR_SOURCE="$wheel_dir" \
     TRACE_PLUGIN_SOURCE_DIR="$trace_dir" \
     TB_SKIP_DOCKERHUB_PREFLIGHT="1" \
     TB_RUNS="1" \
@@ -161,6 +198,10 @@ main() {
   opencode_capture="$tmp/opencode-default.args"
   run_harboropik "opencode" "$capture_bin" "$opencode_capture" "$tmp/opencode-default"
   assert_extra_compose_arg "$opencode_capture" "$default_overlay"
+  assert_structured_mount_arg \
+    "$opencode_capture" \
+    "$tmp/opencode-default/wheels" \
+    "/opt/tb-opik/python-wheels"
 }
 
 main "$@"

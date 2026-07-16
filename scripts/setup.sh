@@ -82,6 +82,10 @@ node_major() { node -v 2>/dev/null | sed -E 's/^v([0-9]+).*/\1/' || echo 0; }
 load_nvm() {
   export NVM_DIR="$HOME/.nvm"
   [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+  # Sourcing is best-effort: a missing nvm.sh (or a non-zero return from it)
+  # must not abort the script under `set -e`. Callers gate on `command -v
+  # node`/`nvm` afterwards, so a missing nvm here is handled, not fatal.
+  return 0
 }
 
 load_nvm

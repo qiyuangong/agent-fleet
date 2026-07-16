@@ -5,6 +5,9 @@ RL_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HARBOR_SCRIPT_DIR="${HARBOR_SCRIPT_DIR:-$(cd "$RL_SCRIPT_DIR/../common/Harbor" && pwd)}"
 . "$HARBOR_SCRIPT_DIR/env.sh"
 
+# Prevent a failed long-lived rollout UI process from filling the run disk.
+ulimit -c 0 >/dev/null 2>&1 || true
+
 DETACH_MODE=false
 STOP_MODE=false
 if [[ "${1:-}" == "--detach" ]]; then

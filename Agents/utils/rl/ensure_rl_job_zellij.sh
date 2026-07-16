@@ -73,6 +73,8 @@ session_ready() {
   zellij kill-session "$session_name" >/dev/null 2>&1 || true
   zellij delete-session "$session_name" >/dev/null 2>&1 || true
   zellij_cmd="$(printf 'stty rows 54 cols 172; exec zellij --session %q --new-session-with-layout %q' "$session_name" "$layout_file")"
+  # Worker and monitor logs are already persisted. Do not duplicate every
+  # terminal repaint into an unbounded zellij typescript file.
   nohup setsid env -u ZELLIJ_SESSION_NAME TERM=xterm-256color \
     RL_ZELLIJ_ROLE=job \
     RL_ZELLIJ_JOB_ID="$ray_job_id" \
@@ -81,8 +83,7 @@ session_ready() {
     RUNTIME_DIR="$job_runtime_dir" \
     LAYOUT_FILE="$layout_file" \
     JOBS_ROOT="${OUTPUT_PATH}/jobs/${agent_slug}/${job_slug}" \
-    script -q -c "$zellij_cmd" "$job_runtime_dir/zellij-${session_name}.typescript" \
-    >"$job_runtime_dir/zellij-${session_name}.log" 2>&1 &
+    script -q -c "$zellij_cmd" /dev/null >/dev/null 2>&1 &
 
   # zellij can take tens of seconds to become visible under Docker-in-Docker
   # load.  Do not report failure while the detached session is still starting.

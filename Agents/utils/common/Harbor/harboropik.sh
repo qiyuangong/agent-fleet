@@ -1,6 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+VERIFIER_UV_BIN_DIR_SOURCE=""
+
+cleanup_verifier_uv_bin_dir() {
+  [[ -n "$VERIFIER_UV_BIN_DIR_SOURCE" ]] || return 0
+  rm -rf -- "$VERIFIER_UV_BIN_DIR_SOURCE"
+}
+
+# Each invocation owns one verifier backup; remove it on success or failure.
+trap cleanup_verifier_uv_bin_dir EXIT
+
 # harboropik.sh — One-click Terminal Bench runner with real-time Opik tracing
 #
 # This script orchestrates end-to-end evaluation of agent tasks through
@@ -510,10 +520,9 @@ run_tb() {
     echo "[ERROR] current TB_LLM_KWARGS: $TB_LLM_KWARGS" >&2
     exit 1
   fi
-  local verifier_uv_bin_dir_source
-  verifier_uv_bin_dir_source="$(mktemp -d "${RUNTIME_DIR%/}/verifier-uv.${job_name}.XXXXXX" 2>/dev/null || true)"
-  if [[ -n "$verifier_uv_bin_dir_source" ]]; then
-    prepare_verifier_uv_bin "$verifier_uv_bin_dir_source" || true
+  VERIFIER_UV_BIN_DIR_SOURCE="$(mktemp -d "${RUNTIME_DIR%/}/verifier-uv.${job_name}.XXXXXX" 2>/dev/null || true)"
+  if [[ -n "$VERIFIER_UV_BIN_DIR_SOURCE" ]]; then
+    prepare_verifier_uv_bin "$VERIFIER_UV_BIN_DIR_SOURCE" || true
   else
     echo "[WARN] failed to create verifier uv backup dir; verifier will use its normal uv install path" >&2
   fi
@@ -598,7 +607,7 @@ PY
     --ae "PIP_DEFAULT_TIMEOUT=$TB_PIP_DEFAULT_TIMEOUT"
     --ae "PIP_RETRIES=$TB_PIP_RETRIES"
     --ae "PIP_DISABLE_PIP_VERSION_CHECK=1"
-    --ae "TB_RUN_ID=$job_name"
+    --ae "TB_RUN_ID=${TB_RUN_ID:-$job_name}"
     --ae "TB_TASK_ID=$effective_tb_task_id"
     --ae "TB_INCLUDE_TASKS=${TB_INCLUDE_TASKS:-$INCLUDE_TASKS}"
     --ae "INCLUDE_TASKS=$INCLUDE_TASKS"
@@ -672,7 +681,7 @@ PY
 
   local mounts_json
   mounts_json="$(
-    python3 - "$hook_mount_enabled" "$TB_CC_HOOK_SOURCE" "$TB_CC_HOOK_MOUNT_PATH" "$TB_CC_CLAUDE_TGZ_SOURCE" "$TB_CC_CLAUDE_TGZ_MOUNT_PATH" "$TB_CC_PY_WHEEL_DIR_SOURCE" "$TB_CC_PY_WHEEL_DIR_MOUNT_PATH" "$verifier_uv_bin_dir_source" "$TB_VERIFIER_UV_BIN_DIR_MOUNT_PATH" <<'PY'
+    python3 - "$hook_mount_enabled" "$TB_CC_HOOK_SOURCE" "$TB_CC_HOOK_MOUNT_PATH" "$TB_CC_CLAUDE_TGZ_SOURCE" "$TB_CC_CLAUDE_TGZ_MOUNT_PATH" "$TB_CC_PY_WHEEL_DIR_SOURCE" "$TB_CC_PY_WHEEL_DIR_MOUNT_PATH" "$VERIFIER_UV_BIN_DIR_SOURCE" "$TB_VERIFIER_UV_BIN_DIR_MOUNT_PATH" <<'PY'
 import json
 import os
 import sys
@@ -708,7 +717,7 @@ PY
   if [[ "$mounts_json" != "[]" ]]; then
     cmd+=( --mounts-json "$mounts_json" )
   fi
-  if [[ -n "$verifier_uv_bin_dir_source" && -x "$verifier_uv_bin_dir_source/uv" && -x "$verifier_uv_bin_dir_source/uvx" ]]; then
+  if [[ -n "$VERIFIER_UV_BIN_DIR_SOURCE" && -x "$VERIFIER_UV_BIN_DIR_SOURCE/uv" && -x "$VERIFIER_UV_BIN_DIR_SOURCE/uvx" ]]; then
     local verifier_uv_path_prefix
     verifier_uv_path_prefix="/root/.local/bin:/home/oai/.local/bin:/home/agent/.local/bin:/home/ubuntu/.local/bin"
     if [[ -n "${TB_VERIFIER_UV_HOME:-}" ]]; then
@@ -932,7 +941,7 @@ PY
       --ae "OPENCODE_LINUX_X64_TGZ_PATH=$TB_CC_PY_WHEEL_DIR_MOUNT_PATH/$OPENCODE_LINUX_X64_TGZ_BASENAME"
       --ae "TB_LOCAL_OPENCODE_TGZ_URL=$opencode_tgz_url"
       --ae "TB_LOCAL_OPENCODE_LINUX_X64_TGZ_URL=$opencode_linux_x64_tgz_url"
-      --ae "TB_RUN_ID=$RUN_ID"
+      --ae "TB_RUN_ID=${TB_RUN_ID:-$RUN_ID}"
       --ae "TB_TASK_ID=$effective_tb_task_id"
       --ae "TB_INCLUDE_TASKS=${TB_INCLUDE_TASKS:-$INCLUDE_TASKS}"
       --ae "INCLUDE_TASKS=$INCLUDE_TASKS"

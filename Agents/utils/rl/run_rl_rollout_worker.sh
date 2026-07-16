@@ -24,14 +24,9 @@ safe_name() {
   printf '%s' "$1" | tr '/[:space:]' '___' | tr -cd 'A-Za-z0-9._-'
 }
 
-rename_pane() {
-  local name="$1"
-  printf '\033]2;%s\007' "$name" || true
-  if [[ -n "${ZELLIJ:-}" && -n "${ZELLIJ_PANE_ID:-}" ]]; then
-    # zellij rename-pane defaults to the focused pane.  Target the worker pane
-    # explicitly so a worker never renames the monitor pane.
-    zellij action rename-pane --pane-id "$ZELLIJ_PANE_ID" "$name" >/dev/null 2>&1 || true
-  fi
+clear_pane_history() {
+  # Logs remain on disk; each pane should show only its current rollout task.
+  printf '\033[3J\033[H\033[2J'
 }
 
 json_get() {
@@ -198,6 +193,9 @@ find_trial_logs_dir() {
 
 finalize_timeout_trace() {
   local result_file="$1"
+  local project_name="${2:-${OPIK_PROJECT_NAME:-}}"
+  local run_id="${3:-${TB_RUN_ID:-}}"
+  local task_id="${4:-${TB_TASK_ID:-}}"
   local logs_dir py normalized_opik_url
   logs_dir="$(find_trial_logs_dir "$result_file" || true)"
   [[ -n "${logs_dir:-}" && -d "$logs_dir" ]] || return 0
@@ -212,6 +210,9 @@ finalize_timeout_trace() {
     export OPIK_URL_OVERRIDE="$normalized_opik_url"
     export OPIK_URL="$normalized_opik_url"
   fi
+  export OPIK_PROJECT_NAME="$project_name"
+  export TB_RUN_ID="$run_id"
+  export TB_TASK_ID="$task_id"
   if [[ "$RL_AGENT" == "opencode" ]]; then
     "$py" "$HARBOR_OPENCODE_DIR/finalize_opencode_sessions.py" \
       --status timeout --logs-dir "$logs_dir" >> "$WORKER_LOG" 2>&1 || true
@@ -238,7 +239,6 @@ claim_request() {
 
 cleanup() {
   rm -f "$CURRENT_FILE"
-  rename_pane "worker-${WORKER_ID}"
   stop_agent_log_stream
 }
 trap cleanup EXIT
@@ -253,12 +253,13 @@ while true; do
   request_id="$(json_get "$request_file" request_id)"
   task_name="$(json_get "$request_file" task_id)"
   dataset_root="$(json_get "$request_file" dataset_root)"
-  model_name="$(json_get_first "$request_file" model_name trial_config.agent.model_name)"
+  model_name="$(json_get "$request_file" model_name)"
   api_base="$(json_get_first "$request_file" api_base trial_config.agent.kwargs.api_base)"
   api_key="$(json_get_first "$request_file" api_key trial_config.agent.kwargs.api_key trial_config.agent.kwargs.llm_kwargs.api_key)"
   api_key="${api_key:-${RL_API_KEY:-}}"
   session_id="$(json_get "$request_file" session_id)"
   ray_job_id="$(json_get "$request_file" ray_job_id)"
+  opik_project_name="$(json_get "$request_file" opik_project_name)"
   polar_task_id="$(json_get "$request_file" polar_task_id)"
   display_name="$(json_get "$request_file" display_name)"
   force_build="$(json_get_first "$request_file" force_build trial_config.environment.force_build)"
@@ -282,12 +283,12 @@ while true; do
   fi
   task_safe="$(safe_name "$display_name")"
   task_jobs_root="$JOBS_ROOT/rl-worker-${WORKER_ID}/${request_id}-${task_safe}"
-  task_console_log="$OUTPUT_PATH/${request_id}-${task_safe}.console.log"
+  task_console_log="$task_jobs_root/console.log"
   result_out="$RESULTS_DIR/${request_id}.json"
 
   mkdir -p "$task_jobs_root"
   printf '%s\t%s\t%s\t%s\t%s\n' "$request_id" "$task_name" "$display_name" "$ray_job_id" "$polar_task_id" > "$CURRENT_FILE"
-  rename_pane "$display_name"
+  clear_pane_history
   log_msg "starting request=${request_id} display=${display_name} task=${task_name} ray_job=${ray_job_id:-none} polar_task=${polar_task_id:-none}"
 
   if [[ -n "$dataset_root" ]]; then
@@ -310,6 +311,22 @@ while true; do
     export TB_AGENT="$RL_AGENT"
     export MODEL="$model_name"
     export TB_MODEL="$model_name"
+    export RL_MODEL_NAME="$model_name"
+    export TB_RUN_ID="$ray_job_id"
+    export OPIK_PROJECT_NAME="$opik_project_name"
+    if [[ "$RL_AGENT" == "claude-code" ]]; then
+      # env.sh derives these aliases when the listener starts. Override every
+      # alias per request so a later rollout model cannot inherit that default.
+      export TB_ANTHROPIC_MODEL="$model_name"
+      export TB_ANTHROPIC_DEFAULT_OPUS_MODEL="$model_name"
+      export TB_ANTHROPIC_DEFAULT_SONNET_MODEL="$model_name"
+      export TB_ANTHROPIC_DEFAULT_HAIKU_MODEL="$model_name"
+      export TB_CLAUDE_CODE_SUBAGENT_MODEL="$model_name"
+    elif [[ "$RL_AGENT" == "opencode" ]]; then
+      # Force env.sh to rebuild the custom-provider JSON from this request's
+      # model, endpoint, and key instead of reusing the listener-time snapshot.
+      export OPENCODE_CONFIG_CONTENT=""
+    fi
     # Rollout may target Polar gateways with smaller context windows than the
     # normal benchmark defaults. Apply RL_* budgets to the Harbor/Claude args.
     export TB_MAX_NEW_TOKENS="${max_new_tokens:-${RL_MAX_NEW_TOKENS:-${TB_MAX_NEW_TOKENS:-}}}"
@@ -412,7 +429,7 @@ PY
     reward="$(echo "$summary" | sed -n '1p')"
     exception_type="$(echo "$summary" | sed -n '2p')"
     if [[ "${exception_type:-}" == "AgentTimeoutError" ]]; then
-      finalize_timeout_trace "$result_file"
+      finalize_timeout_trace "$result_file" "$opik_project_name" "$ray_job_id" "$task_name"
     fi
     if [[ -z "${exception_type:-}" && "$rc" -eq 0 ]]; then
       status="completed"
@@ -424,5 +441,9 @@ PY
     "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$request_id" "$task_name" "$display_name" "$ray_job_id" "$polar_task_id" "$status" "$reward" "$exception_type" >> "$RL_TRACE_LOG"
   log_msg "finished request=${request_id} display=${display_name} task=${task_name} status=${status} reward=${reward:-none} exception=${exception_type:-none} rc=${rc}"
   rm -f "$CURRENT_FILE" "$request_file"
-  rename_pane "worker-${WORKER_ID}"
+  if ! python3 "$RL_SCRIPT_DIR/rollout_worker_utils.py" prune-trials \
+    "$JOBS_ROOT/rl-worker-${WORKER_ID}" \
+    --keep "${RL_KEEP_TRIALS_PER_WORKER:-20}"; then
+    log_msg "warning: failed to prune old rollout artifacts"
+  fi
 done

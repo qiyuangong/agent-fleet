@@ -32,6 +32,7 @@ DEFAULT_MODEL_NAME = os.environ.get("RL_MODEL_NAME", "minimax2.7")
 DEFAULT_API_BASE = os.environ.get("RL_API_BASE", "")
 DEFAULT_API_KEY = os.environ.get("RL_API_KEY", "")
 DEFAULT_API_KEY_MODE = os.environ.get("RL_API_KEY_MODE", "static").strip().lower()
+DEFAULT_OPIK_PROJECT_NAME = os.environ.get("OPIK_PROJECT_NAME", "")
 DEFAULT_DISABLED_TASK_IDS = os.environ.get("RL_DISABLED_TASK_IDS", "")
 DEFAULT_TIMEOUT = float(os.environ.get("RL_REQUEST_TIMEOUT", "3600"))
 TRACE_LOG = Path(os.environ.get("RL_TRACE_LOG", "/workspace/runs/rl-rollout-requests.jsonl"))
@@ -104,6 +105,14 @@ def _extract_ray_job_id(request: dict[str, Any]) -> str:
         trial.get("ray_submission_id"),
         trial.get("ray_job"),
         trial.get("job_id"),
+    )
+
+
+def _extract_opik_project_name(request: dict[str, Any], ray_job_id: str) -> str:
+    return _first_nonempty(
+        request.get("opik_project_name"),
+        ray_job_id,
+        DEFAULT_OPIK_PROJECT_NAME,
     )
 
 
@@ -208,7 +217,13 @@ def _clear_cached_job_session(job_slug: str, session_name: str) -> None:
             JOB_ZELLIJ_READY.pop(job_slug, None)
 
 
-def _ensure_job_zellij(ray_job_id: str, dataset_name: str, queue_dir: Path) -> str:
+def _ensure_job_zellij(
+    ray_job_id: str,
+    dataset_name: str,
+    queue_dir: Path,
+    model_name: str,
+    opik_project_name: str,
+) -> str:
     if not ray_job_id:
         raise ValueError("ray_job_id is required in rollout mode so a worker zellij session can be started")
     if not ENABLE_DYNAMIC_JOB_ZELLIJ:
@@ -237,6 +252,8 @@ def _ensure_job_zellij(ray_job_id: str, dataset_name: str, queue_dir: Path) -> s
             "RL_ZELLIJ_JOB_ID": ray_job_id,
             "RL_ZELLIJ_JOB_QUEUE_DIR": str(queue_dir),
             "RL_JOB_RUNTIME_ROOT": str(JOB_RUNTIME_ROOT),
+            "RL_MODEL_NAME": model_name,
+            "OPIK_PROJECT_NAME": opik_project_name,
         })
         returncode, stdout, stderr = _run_helper(
             [str(script), ray_job_id, dataset_name, str(queue_dir)],
@@ -334,14 +351,22 @@ def _enqueue_request(request: dict[str, Any]) -> tuple[str, Path]:
     task_path = resolve_task_path(request)
     dataset_root = _dataset_root(request.get("dataset_name"), request.get("dataset_root"))
     dataset_name = request.get("dataset_name") or DEFAULT_DATASET_NAME
+    model_name = request.get("model_name") or DEFAULT_MODEL_NAME
     ray_job_id = _extract_ray_job_id(request)
+    opik_project_name = _extract_opik_project_name(request, ray_job_id)
     polar_task_id = _extract_polar_task_id(request, session_id)
     display_name = _display_name(task_path.name, polar_task_id, session_id)
     queue_dir = _queue_for_job(ray_job_id)
     pending_dir = queue_dir / "pending"
     results_dir = queue_dir / "results"
     active_dir = queue_dir / "active"
-    zellij_session = _ensure_job_zellij(ray_job_id, dataset_name, queue_dir)
+    zellij_session = _ensure_job_zellij(
+        ray_job_id,
+        dataset_name,
+        queue_dir,
+        model_name,
+        opik_project_name,
+    )
     payload = {
         **request,
         "request_id": request_id,
@@ -353,7 +378,8 @@ def _enqueue_request(request: dict[str, Any]) -> tuple[str, Path]:
         "task_path": str(task_path),
         "dataset_name": dataset_name,
         "dataset_root": str(dataset_root),
-        "model_name": request.get("model_name") or DEFAULT_MODEL_NAME,
+        "model_name": model_name,
+        "opik_project_name": opik_project_name,
         "api_base": request.get("api_base") or os.environ.get("RL_API_BASE", ""),
         "api_key": request.get("api_key") or DEFAULT_API_KEY,
         "api_key_mode": DEFAULT_API_KEY_MODE,
@@ -377,6 +403,8 @@ def _enqueue_request(request: dict[str, Any]) -> tuple[str, Path]:
         "session_id": session_id,
         "ray_job_id": ray_job_id,
         "polar_task_id": polar_task_id,
+        "model_name": model_name,
+        "opik_project_name": opik_project_name,
         "dataset_name": payload["dataset_name"],
         "queue_dir": str(queue_dir),
         "zellij_session": zellij_session,

@@ -454,6 +454,28 @@ exit "${STUB_EXIT:-0}"
             proc.stderr.close()
             proc.wait()
 
+    def test_short_flags_match_long_forms(self):
+        output = self.root / "spec.json"
+        result = self.run_goal(
+            "-p",
+            "Run terminal-bench/terminal-bench-2 with claude-code and 2 workers",
+            "-o",
+            str(output),
+            "-d",
+            "--dry-run",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Harbor/start.sh --detach", result.stdout)
+        self.assertTrue(output.exists())
+
+    def test_short_option_token_rejected_as_output_value(self):
+        result = self.run_goal("-p", "Run pinchbench", "-o", "-d")
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("requires a file path", result.stderr)
+        self.assertNotIn("runner=", result.stdout)
+
     def test_unsupported_terminus_prompt_does_not_write_a_spec(self):
         output = self.root / "fleet-spec.json"
         result = self.run_goal(

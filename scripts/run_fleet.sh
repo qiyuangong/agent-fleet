@@ -3,10 +3,10 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="${REPO_DIR:-$(cd "$SCRIPT_DIR/.." && pwd)}"
-[[ "${1:-}" != "--prompt" ]] || exec bash "$SCRIPT_DIR/fleet_goal.sh" "$@"
+[[ "${1:-}" != "--prompt" && "${1:-}" != "-p" ]] || exec bash "$SCRIPT_DIR/fleet_goal.sh" "$@"
 for arg in "$@"; do
-  if [[ "$arg" == "--prompt" ]]; then
-    printf '[ERROR] --prompt must be the first argument\n' >&2
+  if [[ "$arg" == "--prompt" || "$arg" == "-p" ]]; then
+    printf '[ERROR] %s must be the first argument\n' "$arg" >&2
     exit 2
   fi
 done
@@ -17,7 +17,16 @@ Usage:
   $0 --spec <file|-> [--detach] [--dry-run]
   $0 --prompt <text> [--output <file>] [--detach] [--dry-run]
 
-OpenClaw tasksets: pinchbench, clawbio
+Short flags: -t --taskset, -a --agent, -n --workers, -s --spec, -p --prompt,
+             -o --output, -d --detach
+
+Tasksets: seta, smith, terminalbench21, sweverify, a registry id, a local
+          path (./dir), or the OpenClaw tasksets: pinchbench, clawbio
+Agents:   claude-code, opencode; openclaw for OpenClaw tasksets
+
+Examples:
+  $0 -t terminalbench21 -a claude-code -n 10 -d
+  $0 -p "Run terminalbench21 with claude-code and 2 workers"
 EOF
 }
 
@@ -72,11 +81,11 @@ while [[ $# -gt 0 ]]; do
     -t|--taskset) TASKSET="$2"; shift 2 ;;
     -a|--agent) AGENT_ARG="$2"; shift 2 ;;
     -n|--workers) WORKERS="$2"; shift 2 ;;
-    --spec)
+    -s|--spec)
       [[ $# -ge 2 ]] || { printf '[ERROR] --spec requires a file path or -\n' >&2; exit 2; }
       SPEC_SOURCE="$2"; shift 2
       ;;
-    --detach) DETACH=1; shift ;;
+    -d|--detach) DETACH=1; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) usage >&2; exit 2 ;;

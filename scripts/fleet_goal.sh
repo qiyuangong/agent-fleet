@@ -12,6 +12,8 @@ Usage:
 Translate one natural-language prompt into FleetSpec v1, validate it, and run
 it through the existing FleetSpec execution path. --output optionally saves the
 validated spec before execution.
+
+Short flags: -p --prompt, -o --output, -d --detach
 EOF
 }
 
@@ -19,7 +21,7 @@ err() { printf '[ERROR] %s\n' "$*" >&2; }
 
 is_recognized_option() {
   case "$1" in
-    --prompt|--output|--detach|--dry-run|-h|--help) return 0 ;;
+    -p|--prompt|-o|--output|-d|--detach|--dry-run|-h|--help) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -49,11 +51,11 @@ load_config() {
 PROMPT="" OUTPUT="" output_dir="" DETACH=0 DRY_RUN=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --prompt)
+    -p|--prompt)
       [[ $# -ge 2 ]] || { err "--prompt requires text"; exit 2; }
       PROMPT="$2"; shift 2
       ;;
-    --output)
+    -o|--output)
       [[ $# -ge 2 ]] || { err "--output requires a file path"; exit 2; }
       # A recognized option token here is a mangled command line, not a
       # filename; silently consuming it turns an intended preview into a
@@ -65,7 +67,7 @@ while [[ $# -gt 0 ]]; do
       fi
       OUTPUT="$2"; shift 2
       ;;
-    --detach) DETACH=1; shift ;;
+    -d|--detach) DETACH=1; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) usage >&2; exit 2 ;;

@@ -72,14 +72,21 @@ Safe to re-run.
 
 | Option | Description |
 | --- | --- |
-| `--taskset <value>` | Harbor taskset, explicit local path, `pinchbench`, or `clawbio` |
-| `--agent <name>` | Optional Harbor agent override; `openclaw` is accepted for consistent OpenClaw commands |
-| `--workers <n>` | Harbor workers or OpenClaw fleet instances |
-| `--spec <file|->` | Read a FleetSpec v1 JSON object from a file or standard input |
-| `--detach` | Start Harbor in its detached Zellij mode; ignored with a warning for OpenClaw tasksets |
-| `--prompt <text>` | Translate, validate, and run one natural-language benchmark request |
-| `--output <file>` | Save Prompt mode's validated FleetSpec before running it |
+| `-t, --taskset <value>` | Harbor taskset, explicit local path, `pinchbench`, or `clawbio` |
+| `-a, --agent <name>` | Optional Harbor agent override; `openclaw` is accepted for consistent OpenClaw commands |
+| `-n, --workers <n>` | Harbor workers or OpenClaw fleet instances |
+| `-s, --spec <file|->` | Read a FleetSpec v1 JSON object from a file or standard input |
+| `-d, --detach` | Start Harbor in its detached Zellij mode; ignored with a warning for OpenClaw tasksets |
+| `-p, --prompt <text>` | Translate, validate, and run one natural-language benchmark request |
+| `-o, --output <file>` | Save Prompt mode's validated FleetSpec before running it |
 | `--dry-run` | Print the downstream command and environment without running it |
+
+Every short flag behaves exactly like its long form, for example:
+
+```bash
+./scripts/run_fleet.sh -t terminalbench21 -a claude-code -n 10 -d
+./scripts/run_fleet.sh -p "Run terminalbench21 with claude-code and 2 workers"
+```
 
 Examples:
 
@@ -166,9 +173,10 @@ model never receives tools and never constructs or executes the runner command.
   --output fleet-spec.json --dry-run
 ```
 
-`--prompt` must be the first argument; if it appears later, `run_fleet.sh`
-reports the ordering requirement instead of falling through to a generic usage
-error. Prompt mode also accepts `--output`, `--detach`, and `--dry-run`.
+`--prompt` (or `-p`) must be the first argument; if it appears later,
+`run_fleet.sh` reports the ordering requirement instead of falling through to a
+generic usage error. Prompt mode also accepts `--output`, `--detach`, and
+`--dry-run`.
 
 Before execution, Prompt mode prints the validated FleetSpec to standard error
 as one `[INFO] FleetSpec: {...}` line, so the model's interpretation is visible

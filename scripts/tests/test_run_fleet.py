@@ -321,12 +321,54 @@ exit "${STUB_EXIT:-0}"
         self.assertIn("--prompt", result.stdout)
         self.assertIn("--dry-run", result.stdout)
         self.assertNotRegex(result.stdout, r"--tasks(?:\s|$)")
+        # Help must be self-sufficient: a user who forgot the value names
+        # should find them here without opening the README.
+        self.assertIn("Short flags:", result.stdout)
+        self.assertIn("terminalbench21", result.stdout)
+        self.assertIn("claude-code", result.stdout)
+        self.assertNotIn("Terminus-2", result.stdout)
+        self.assertIn("Examples:", result.stdout)
 
     def test_misordered_prompt_reports_first_argument_requirement(self):
         result = self.run_fleet("--dry-run", "--prompt", "Run pinchbench")
 
         self.assertEqual(result.returncode, 2)
         self.assertIn("--prompt must be the first argument", result.stderr)
+
+    def test_short_flags_match_long_forms(self):
+        result = self.run_fleet(
+            "-t",
+            "terminal-bench/terminal-bench-2-1",
+            "-a",
+            "claude-code",
+            "-n",
+            "3",
+            "-d",
+            "--dry-run",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("DATASET_NAME=terminal-bench/terminal-bench-2-1", result.stdout)
+        self.assertIn("AGENT=claude-code", result.stdout)
+        self.assertIn("TOTAL_WORKERS=3", result.stdout)
+        self.assertIn("Harbor/start.sh --detach", result.stdout)
+
+    def test_short_spec_flag_reads_stdin(self):
+        result = self.run_fleet(
+            "-s",
+            "-",
+            "--dry-run",
+            input_text=json.dumps(
+                {"schema_version": 1, "taskset": "terminalbench21"}
+            ),
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("DATASET_NAME=terminalbench21", result.stdout)
+
+    def test_misordered_short_prompt_reports_first_argument_requirement(self):
+        result = self.run_fleet("--dry-run", "-p", "Run pinchbench")
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("-p must be the first argument", result.stderr)
 
     def test_portal_is_shell_only(self):
         portal = SCRIPT.read_text(encoding="utf-8")

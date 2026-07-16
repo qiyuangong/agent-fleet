@@ -56,6 +56,19 @@ submodule. Initialize it before running:
 git submodule update --init --recursive
 ```
 
+## Docker Compose Overlay
+
+Harbor runs task containers through Docker. For DinD runners where the outer
+container is privileged, this runner passes a default compose overlay that keeps
+task containers unprivileged:
+
+```yaml
+# Agents/utils/common/Harbor/overlays/unprivileged-task.yaml
+services:
+  main:
+    privileged: false
+```
+
 ## Datasets
 
 Use these values in `env.sh`:

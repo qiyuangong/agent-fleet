@@ -149,6 +149,10 @@ append_rust_package_mirror_env() {
   fi
 }
 
+append_harbor_unprivileged_docker_compose() {
+  cmd+=( --extra-docker-compose "$SCRIPT_DIR/overlays/unprivileged-task.yaml" )
+}
+
 ensure_trace_plugin_source_if_needed() {
   if [[ "$TB_DRY_RUN" == "1" ]]; then
     return 0
@@ -606,6 +610,7 @@ PY
   else
     cmd+=( --path "$TB_PATH" )
   fi
+  append_harbor_unprivileged_docker_compose
   if [[ -n "${TB_VERIFIER_UV_HOME:-}" ]]; then
     cmd+=( --ve "HOME=$TB_VERIFIER_UV_HOME" )
   fi
@@ -942,6 +947,7 @@ PY
     else
       cmd+=( --path "$TB_PATH" )
     fi
+    append_harbor_unprivileged_docker_compose
 
     if [[ -n "${TB_AGENT_TIMEOUT_MULTIPLIER:-}" ]]; then
       cmd+=( --agent-timeout-multiplier "$TB_AGENT_TIMEOUT_MULTIPLIER" )

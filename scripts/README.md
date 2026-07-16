@@ -109,7 +109,7 @@ Create `fleet-spec.json` with any text editor, for example
 | `schema_version` | Yes | Must be `1` |
 | `taskset` | Yes | Registry ID, explicit local path, `pinchbench`, or `clawbio` |
 | `agent` | No | Agent passed to the selected runner |
-| `workers` | No | Positive integer |
+| `workers` | No | Integer from 1 to 4096 |
 
 Preview the resolved command, then run it:
 

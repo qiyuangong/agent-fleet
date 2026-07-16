@@ -65,7 +65,7 @@ fi
 # ---- 2. Base dependency check ----
 info "Checking base dependencies..."
 MISSING=()
-for cmd in git curl docker python3; do
+for cmd in git curl jq docker python3; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     MISSING+=("$cmd")
   fi
@@ -75,7 +75,7 @@ if [[ ${#MISSING[@]} -gt 0 ]]; then
   err "Please install them first. e.g. Ubuntu: sudo apt install ${MISSING[*]}"
   exit 1
 fi
-ok "Base dependencies present (git / curl / docker / python3)"
+ok "Base dependencies present (git / curl / jq / docker / python3)"
 
 # ---- 3. Ensure Node >=18 (via nvm if needed) ----
 node_major() { node -v 2>/dev/null | sed -E 's/^v([0-9]+).*/\1/' || echo 0; }

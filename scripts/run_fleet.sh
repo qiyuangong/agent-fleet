@@ -39,7 +39,7 @@ load_spec() {
       ((has("agent") | not) or
         (.agent | type == "string" and length > 0 and (test("[[:cntrl:]]") | not))) and
       ((has("workers") | not) or
-        (.workers | type == "number" and . > 0 and . == floor))
+        (.workers | type == "number" and . > 0 and . == floor and . <= 4096))
     ) then .[0] else error("invalid FleetSpec") end
   ' <<<"$spec_json" 2>/dev/null)"; then
     printf '[ERROR] invalid FleetSpec v1: %s\n' "$source" >&2
@@ -49,7 +49,10 @@ load_spec() {
 
   TASKSET="$(jq -r '.taskset' <<<"$spec_json")"
   AGENT_ARG="$(jq -r 'if has("agent") then .agent else "" end' <<<"$spec_json")"
-  WORKERS="$(jq -r 'if has("workers") then (.workers | tostring) else "" end' <<<"$spec_json")"
+  # floor normalizes integral floats (3.0 -> "3"); otherwise the spec value
+  # flows downstream as TOTAL_WORKERS=3.0, which breaks bash arithmetic and
+  # pinchbench's integer --instances parsing.
+  WORKERS="$(jq -r 'if has("workers") then (.workers | floor | tostring) else "" end' <<<"$spec_json")"
 }
 
 run_command() {

@@ -249,6 +249,8 @@ exit "${STUB_EXIT:-0}"
             {"schema_version": 1, "taskset": "terminalbench21", "agent": ""},
             {"schema_version": 1, "taskset": "terminalbench21", "workers": 0},
             {"schema_version": 1, "taskset": "terminalbench21", "workers": 1.5},
+            {"schema_version": 1, "taskset": "terminalbench21", "workers": 4097},
+            {"schema_version": 1, "taskset": "terminalbench21", "workers": 1e20},
             {"schema_version": 1, "taskset": "terminalbench21", "extra": True},
         )
         for payload in invalid_specs:
@@ -257,6 +259,20 @@ exit "${STUB_EXIT:-0}"
                 result = self.run_fleet("--spec", "-", input_text=text)
                 self.assertEqual(result.returncode, 2)
                 self.assertIn("invalid FleetSpec v1", result.stderr)
+
+    def test_spec_normalizes_integral_float_workers(self):
+        # JSON offers no int/float distinction, so 3.0 passes validation as an
+        # integral number; it must still reach the runner as "3", never "3.0".
+        result = self.run_fleet(
+            "--spec", "-", "--dry-run",
+            input_text=json.dumps(
+                {"schema_version": 1, "taskset": "terminalbench21", "workers": 3.0}
+            ),
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("TOTAL_WORKERS=3", result.stdout)
+        self.assertNotIn("TOTAL_WORKERS=3.0", result.stdout)
 
     def test_spec_rejects_direct_argument_overrides(self):
         result = self.run_fleet(

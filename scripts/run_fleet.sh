@@ -3,12 +3,19 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="${REPO_DIR:-$(cd "$SCRIPT_DIR/.." && pwd)}"
-
+[[ "${1:-}" != "--prompt" ]] || exec bash "$SCRIPT_DIR/fleet_goal.sh" "$@"
+for arg in "$@"; do
+  if [[ "$arg" == "--prompt" ]]; then
+    printf '[ERROR] --prompt must be the first argument\n' >&2
+    exit 2
+  fi
+done
 usage() {
   cat <<EOF
 Usage:
   $0 --taskset <taskset> [--agent <agent>] [--workers <n>] [--detach] [--dry-run]
   $0 --spec <file|-> [--detach] [--dry-run]
+  $0 --prompt <text> [--output <file|->]
 
 OpenClaw tasksets: pinchbench, clawbio
 EOF
@@ -30,17 +37,10 @@ load_spec() {
     return 2
   fi
 
-  if ! spec_json="$(jq -ces '
-    if length == 1 and (.[0] |
-      type == "object" and
-      ((keys - ["agent", "schema_version", "taskset", "workers"]) | length == 0) and
-      (.schema_version == 1) and
-      (.taskset | type == "string" and length > 0 and (test("[[:cntrl:]]") | not)) and
-      ((has("agent") | not) or
-        (.agent | type == "string" and length > 0 and (test("[[:cntrl:]]") | not))) and
-      ((has("workers") | not) or
-        (.workers | type == "number" and . > 0 and . == floor and . <= 4096))
-    ) then .[0] else error("invalid FleetSpec") end
+  if ! spec_json="$(jq -ces -L "$SCRIPT_DIR" '
+    include "fleet_spec_validate";
+    if length == 1 then (.[0] | fleet_spec_v1)
+    else error("invalid FleetSpec") end
   ' <<<"$spec_json" 2>/dev/null)"; then
     printf '[ERROR] invalid FleetSpec v1: %s\n' "$source" >&2
     printf '[ERROR] expected schema_version=1, taskset, optional agent/workers, and no other fields\n' >&2

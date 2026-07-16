@@ -318,8 +318,15 @@ exit "${STUB_EXIT:-0}"
         self.assertIn("--workers", result.stdout)
         self.assertIn("--detach", result.stdout)
         self.assertIn("--spec", result.stdout)
+        self.assertIn("--prompt", result.stdout)
         self.assertIn("--dry-run", result.stdout)
         self.assertNotRegex(result.stdout, r"--tasks(?:\s|$)")
+
+    def test_misordered_prompt_reports_first_argument_requirement(self):
+        result = self.run_fleet("--dry-run", "--prompt", "Run pinchbench")
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("--prompt must be the first argument", result.stderr)
 
     def test_portal_is_shell_only(self):
         portal = SCRIPT.read_text(encoding="utf-8")

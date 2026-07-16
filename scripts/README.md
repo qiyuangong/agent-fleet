@@ -67,6 +67,7 @@ Safe to re-run.
 ```bash
 ./scripts/run_fleet.sh --taskset <taskset> [--agent <agent>] [--workers <n>] [--detach] [--dry-run]
 ./scripts/run_fleet.sh --spec <file|-> [--detach] [--dry-run]
+./scripts/run_fleet.sh --prompt <text> [--output <file|->]
 ```
 
 | Option | Description |
@@ -76,6 +77,8 @@ Safe to re-run.
 | `--workers <n>` | Harbor workers or OpenClaw fleet instances |
 | `--spec <file|->` | Read a FleetSpec v1 JSON object from a file or standard input |
 | `--detach` | Start Harbor in its detached Zellij mode; ignored with a warning for OpenClaw tasksets |
+| `--prompt <text>` | Translate one natural-language prompt into FleetSpec v1 without running it |
+| `--output <file|->` | Prompt mode output file; defaults to standard output |
 | `--dry-run` | Print the downstream command and environment without running it |
 
 Examples:
@@ -145,10 +148,51 @@ Spec input cannot be combined with `--taskset`, `--agent`, or `--workers`.
 Multiple JSON values, unknown fields, control characters, and invalid values
 are rejected.
 
-`run_fleet.sh` only parses these options, maps them to the selected
-runner, and replaces itself with that runner. It does not generate run IDs,
-create output directories, create or monitor sessions, filter tasks, run
-preflight checks, or translate downstream errors.
+### Prompt to FleetSpec
+
+Prompt mode uses the configured model only to translate natural language into a
+reviewable FleetSpec. It never starts Harbor, OpenClaw, or another benchmark
+runner.
+
+```bash
+./scripts/run_fleet.sh \
+  --prompt "Run terminal-bench/terminal-bench-2 with claude-code and 2 workers" \
+  --output fleet-spec.json
+
+./scripts/run_fleet.sh --spec fleet-spec.json --dry-run
+./scripts/run_fleet.sh --spec fleet-spec.json
+```
+
+`--prompt` must be the first argument; if it appears later, `run_fleet.sh`
+reports the ordering requirement instead of falling through to a generic usage
+error. The only other option Prompt mode accepts is `--output`.
+
+Without `--output`, the generated JSON is printed to standard output. Prompt mode
+loads `config.env` and then `config.local.env`; caller environment variables
+still take precedence. `BASE_URL`, `API_KEY`, and `MODEL` must be configured.
+When the shell uses an HTTP proxy for external traffic, add an internal model
+gateway hostname to `NO_PROXY`; Prompt mode preserves the caller's proxy policy
+and does not change it automatically.
+
+FleetSpec v1 describes one run and only supports `taskset`, optional `agent`,
+and optional `workers`. The translator asks for clarification instead of
+guessing when the taskset is missing or ambiguous, multiple runs are requested,
+or the prompt contains requirements that v1 cannot represent. Review the JSON
+before passing it to `--spec`.
+
+Prompt mode supports `claude-code` and `opencode` for Harbor tasksets and
+`openclaw` for `pinchbench` or `clawbio`. It reports other requested agents as
+unsupported instead of producing a spec that would fail after Harbor starts.
+
+Prompt mode exit codes: `0` — a FleetSpec was produced; `2` — invalid CLI
+usage; `3` — the prompt needs clarification or requests an unsupported feature
+(the question or limitation is printed to standard error); `1` — missing tools
+or model configuration, or the model did not return a valid translation.
+
+In `--taskset` and `--spec` modes, `run_fleet.sh` only parses the input, maps it
+to the selected runner, and replaces itself with that runner. It does not
+generate run IDs, create output directories, create or monitor sessions, filter
+tasks, run preflight checks, or translate downstream errors.
 
 Harbor tasksets call `Agents/utils/common/Harbor/start.sh`. Local tasksets must
 use an explicit path beginning with `./`, `../`, `/`, or `~/`. Harbor owns its

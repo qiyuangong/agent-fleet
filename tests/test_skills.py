@@ -72,16 +72,27 @@ class SkillDocsTest(unittest.TestCase):
                 for path in expected["paths"]:
                     self.assertIn(path, body)
 
-    def test_readme_lists_all_skills_and_install_instructions(self):
+    def test_readme_links_skills_guide_and_lists_all_skills(self):
         root_readme = (ROOT / "README.md").read_text(encoding="utf-8")
         skills_readme = (ROOT / "skills" / "README.md").read_text(encoding="utf-8")
 
         self.assertNotIn("## Core Skills", root_readme)
-        self.assertIn("## Use Skills to Operate Fleet/Benchmark", root_readme)
+        self.assertIn("- Skills: [skills/README.md](./skills/README.md)", root_readme)
         self.assertIn("## Install Skills", skills_readme)
         for skill_name in EXPECTED_SKILLS:
             with self.subTest(skill=skill_name):
                 self.assertIn(skill_name, skills_readme)
+
+    def test_root_readme_advertises_supported_runner_agents(self):
+        root_readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        agent_options = re.search(r"`--agent[ \t]+([^`]+)`", root_readme)
+
+        self.assertIsNotNone(agent_options)
+        self.assertEqual(
+            {option.strip() for option in agent_options.group(1).split("|")},
+            {"claude-code", "opencode", "openclaw"},
+        )
+        self.assertNotIn("Terminus-2", root_readme)
 
     def test_prompt_templates_read_local_config_and_use_expected_skills(self):
         prompt_expectations = {

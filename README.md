@@ -1,6 +1,6 @@
 # SII Agent Fleet
 
-SII Agent Fleet provides runnable agent integrations and benchmark task lists for evaluating Claude Code, OpenCode, and Terminus-2.
+SII Agent Fleet provides runnable agent integrations and benchmark task lists for evaluating Claude Code, OpenCode, and OpenClaw.
 
 ## Quick Start
 
@@ -47,7 +47,7 @@ export OPIK_URL=https://your-opik-host/api
 ```
 
 * `--taskset <taskset>` — required, taskset to run
-* `--agent claude-code|opencode|Terminus-2` — optional, agent under test
+* `--agent claude-code|opencode|openclaw` — optional; `openclaw` is for OpenClaw tasksets
 * `--workers <n>` — optional, concurrency (default `10`)
 
 ## Rerun

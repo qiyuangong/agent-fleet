@@ -120,11 +120,28 @@ if expected not in mounts:
 PY
 }
 
+assert_arg_pair() {
+  local capture_file="$1"
+  local option="$2"
+  local expected="$3"
+  python3 - "$capture_file" "$option" "$expected" <<'PY'
+import sys
+from pathlib import Path
+
+args = [part.decode() for part in Path(sys.argv[1]).read_bytes().split(b"\0") if part]
+option, expected = sys.argv[2:]
+if not any(args[index:index + 2] == [option, expected] for index in range(len(args) - 1)):
+    raise SystemExit(f"missing {option} {expected!r} in command: {args!r}")
+PY
+}
+
 run_harboropik() {
   local agent="$1"
   local capture_bin="$2"
   local capture_file="$3"
   local output_dir="$4"
+  local dataset_name="${5:-example/dataset@1.0}"
+  local include_tasks="${6:-}"
   local fake_bin
   local trace_dir
   local wheel_dir
@@ -147,7 +164,8 @@ run_harboropik() {
     PATH="$fake_bin:/usr/bin:/bin:/usr/sbin:/sbin" \
     HOME="$output_dir/home" \
     AGENT="$agent" \
-    DATASET_NAME="example/dataset@1.0" \
+    DATASET_NAME="$dataset_name" \
+    INCLUDE_TASKS="$include_tasks" \
     OUTPUT_PATH="$output_dir/run" \
     HARBOR_QUEUE_WORKER="1" \
     OPIK_MODE="remote" \
@@ -180,6 +198,7 @@ run_harboropik() {
 
 main() {
   local tmp fake_bin default_overlay claude_capture opencode_capture capture_bin
+  local seta_capture sweverify_capture
   tmp="$(mktemp -d)"
   TEST_TMP_DIR="$tmp"
   trap 'rm -rf "$TEST_TMP_DIR"' EXIT
@@ -192,16 +211,37 @@ main() {
   default_overlay="$HARBOR_DIR/overlays/unprivileged-task.yaml"
 
   claude_capture="$tmp/claude-default.args"
-  run_harboropik "claude-code" "$capture_bin" "$claude_capture" "$tmp/claude-default"
+  run_harboropik \
+    "claude-code" "$capture_bin" "$claude_capture" "$tmp/claude-default" \
+    "codepde@1.0"
   assert_extra_compose_arg "$claude_capture" "$default_overlay"
+  assert_arg_pair "$claude_capture" "--dataset" "codepde@1.0"
 
   opencode_capture="$tmp/opencode-default.args"
-  run_harboropik "opencode" "$capture_bin" "$opencode_capture" "$tmp/opencode-default"
+  run_harboropik \
+    "opencode" "$capture_bin" "$opencode_capture" "$tmp/opencode-default" \
+    "terminalbench21" "fix-git"
   assert_extra_compose_arg "$opencode_capture" "$default_overlay"
+  assert_arg_pair "$opencode_capture" "--dataset" "terminal-bench/terminal-bench-2-1"
+  assert_arg_pair "$opencode_capture" "-i" "terminal-bench/fix-git"
   assert_structured_mount_arg \
     "$opencode_capture" \
     "$tmp/opencode-default/wheels" \
     "/opt/tb-opik/python-wheels"
+
+  seta_capture="$tmp/seta-default.args"
+  run_harboropik \
+    "opencode" "$capture_bin" "$seta_capture" "$tmp/seta-default" \
+    "seta" "0"
+  assert_arg_pair "$seta_capture" "--dataset" "seta-env"
+  assert_arg_pair "$seta_capture" "-i" "0"
+
+  sweverify_capture="$tmp/sweverify-default.args"
+  run_harboropik \
+    "opencode" "$capture_bin" "$sweverify_capture" "$tmp/sweverify-default" \
+    "sweverify" "astropy__astropy-12907"
+  assert_arg_pair "$sweverify_capture" "--dataset" "swebench-verified"
+  assert_arg_pair "$sweverify_capture" "-i" "astropy__astropy-12907"
 }
 
 main "$@"

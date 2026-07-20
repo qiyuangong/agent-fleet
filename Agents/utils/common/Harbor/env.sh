@@ -47,7 +47,9 @@ HARBOR_ROOT="${HARBOR_ROOT:-/workspace/harbor}"
 # Dataset selection:
 #   DATASET_NAME: auto, seta, smith, terminalbench21, sweverify,
 #     or a Harbor registry dataset id such as owner/name or owner/name@version.
-#     auto infers from DATASET_PATH.
+#     seta, terminalbench21, and sweverify are registry aliases. smith is local.
+#     For a local/offline checkout, use auto so the dataset is inferred from
+#     DATASET_PATH.
 #   DATASET_PATH examples:
 #     /workspace/seta-env/Harbor-Dataset
 #     /workspace/harbor/datasets/swesmith
@@ -57,6 +59,7 @@ HARBOR_ROOT="${HARBOR_ROOT:-/workspace/harbor}"
 DATASET_NAME="${DATASET_NAME:-auto}"
 DATASET_PATH="${DATASET_PATH:-${TB_PATH:-/workspace/seta-env/Harbor-Dataset}}"
 METRIC_MODE="${METRIC_MODE:-auto}"
+HARBOR_TERMINALBENCH21_REGISTRY_ID="terminal-bench/terminal-bench-2-1"
 
 OUTPUT_ROOT="${OUTPUT_ROOT:-/workspace/runs}"
 OUTPUT_PATH="${OUTPUT_PATH:-${OUTPUT_ROOT}/${RUN_ID}}"
@@ -564,6 +567,11 @@ harbor_metric_mode() {
 }
 
 harbor_registry_dataset_name() {
+  case "$DATASET_NAME" in
+    seta) printf 'seta-env\n'; return 0 ;;
+    terminalbench21) printf '%s\n' "$HARBOR_TERMINALBENCH21_REGISTRY_ID"; return 0 ;;
+    sweverify) printf 'swebench-verified\n'; return 0 ;;
+  esac
   if harbor_dataset_name_is_registry_id "$DATASET_NAME"; then
     printf '%s\n' "$DATASET_NAME"
     return 0
@@ -572,7 +580,17 @@ harbor_registry_dataset_name() {
 }
 
 harbor_uses_registry_dataset() {
-  harbor_dataset_name_is_registry_id "$DATASET_NAME"
+  harbor_registry_dataset_name >/dev/null
+}
+
+harbor_registry_task_name() {
+  local task_name="$1"
+  if [[ "$(harbor_registry_dataset_name 2>/dev/null || true)" == "$HARBOR_TERMINALBENCH21_REGISTRY_ID" ]] \
+    && [[ "$task_name" != */* ]]; then
+    printf 'terminal-bench/%s\n' "$task_name"
+    return 0
+  fi
+  printf '%s\n' "$task_name"
 }
 
 harbor_prepare_task_file() {

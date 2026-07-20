@@ -16,15 +16,18 @@ and ClawBio run against an OpenClaw fleet from `Agents/Openclaw/` (see
 
 ## Harbor Task Lists
 
-Selected by `DATASET_NAME` in the Harbor runner:
+These lists are selected for local runs, including `DATASET_NAME=auto` with a
+matching `DATASET_PATH`:
 
 - `seta` → `SETA/harbor_tasks.txt`
 - `smith` → `SWE-smith/harbor_tasks.txt`
 - `sweverify` → `SWE-verify/harbor_tasks.txt`
 - `terminalbench21` → `Terminal-bench-2/harbor_terminalbench21_tasks.txt`
 
-`TASK_SOURCE_FILE=<path>` overrides the built-in selection. Task lists are
-owned here — don't duplicate them under `Agents/`.
+The `seta`, `sweverify`, and `terminalbench21` aliases resolve to Harbor
+registry datasets by default and skip these local files. `TASK_SOURCE_FILE=<path>`
+overrides the built-in selection for local runs. Task lists are owned here —
+don't duplicate them under `Agents/`.
 
 ## PinchBench (`Pinchbench/`)
 

@@ -43,8 +43,7 @@ Then edit the run parameters in `env.sh`:
 
 ```bash
 AGENT="claude-code"        # claude-code or opencode
-DATASET_NAME="seta"        # local alias, or a Harbor registry dataset id
-DATASET_PATH="/workspace/seta-env/Harbor-Dataset"
+DATASET_NAME="seta"        # built-in Harbor registry alias
 TOTAL_WORKERS="80"
 TB_N_CONCURRENT="80"
 ```
@@ -79,6 +78,16 @@ Use these values in `env.sh`:
 | SWE-Smith | `smith` | `/workspace/harbor/datasets/swesmith` | `80` |
 | Terminal-Bench 2.1 | `terminalbench21` | `/workspace/terminal-bench-2-1/tasks` | `20` |
 | SWE-bench Verified | `sweverify` | `/workspace/swebench-verified` | `20` |
+
+`seta`, `terminalbench21`, and `sweverify` download from the Harbor registry
+by default. `smith` remains local. For an offline or local checkout of any
+dataset, use `auto` with its path:
+
+```bash
+DATASET_NAME=auto \
+DATASET_PATH=/workspace/seta-env/Harbor-Dataset \
+bash Agents/utils/common/Harbor/start.sh --detach
+```
 
 For any Harbor registry dataset, pass the dataset id directly and use the normal
 zellij entrypoint:

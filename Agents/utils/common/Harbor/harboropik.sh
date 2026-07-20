@@ -785,7 +785,7 @@ PY
       task_name="${task_name#"${task_name%%[![:space:]]*}"}"
       task_name="${task_name%"${task_name##*[![:space:]]}"}"
       if [[ -n "$task_name" ]]; then
-        cmd+=( -i "$task_name" )
+        cmd+=( -i "$(harbor_registry_task_name "$task_name")" )
       fi
     done
   fi
@@ -1042,7 +1042,7 @@ PY
         if [[ -n "$task_name" ]]; then
           # Harbor selects tasks in the outer CLI. Passing INCLUDE_TASKS only as
           # agent env is too late and makes one worker run many tasks.
-          cmd+=( -i "$task_name" )
+          cmd+=( -i "$(harbor_registry_task_name "$task_name")" )
         fi
       done
     fi

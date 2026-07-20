@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="${REPO_DIR:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 # shellcheck source=fleet_spec_io.sh
 source "$SCRIPT_DIR/fleet_spec_io.sh"
-[[ "${1:-}" != "--prompt" && "${1:-}" != "-p" ]] || exec bash "$SCRIPT_DIR/fleet_goal.sh" "$@"
+[[ "${1:-}" != "--prompt" && "${1:-}" != "-p" ]] || exec bash "$SCRIPT_DIR/fleet_prompt.sh" "$@"
 for arg in "$@"; do
   if [[ "$arg" == "--prompt" || "$arg" == "-p" ]]; then
     printf '[ERROR] %s must be the first argument\n' "$arg" >&2

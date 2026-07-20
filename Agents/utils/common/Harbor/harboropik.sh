@@ -18,7 +18,7 @@ trap cleanup_verifier_uv_bin_dir EXIT
 # event to an Opik observability project in real time.
 #
 # Workflow:
-#   1. Validate prerequisites (git, curl, python3, uv, Docker daemon)
+#   1. Validate prerequisites (git, curl, python3, Docker daemon)
 #   2. Normalize the Opik API URL (ensures /api suffix is present)
 #   3. Apply minimal-test defaults when TB_MIN_TEST=1 (fast smoke test)
 #   4. Docker Hub connectivity preflight (warn or abort if unreachable)
@@ -26,8 +26,7 @@ trap cleanup_verifier_uv_bin_dir EXIT
 #        - OPIK_MODE=local  → clone Opik repo and start via docker-compose
 #        - OPIK_MODE=remote → verify health and ingestion endpoints
 #   6. Clone the Terminal Bench dataset if not already present locally
-#   7. Build and execute:
-#        /root/.local/bin/opik harbor run ...
+#   7. Build and execute with the pinned runner's `opik harbor run` command,
 #      with PYTHONPATH pointing at Harbor-claude-code so that sitecustomize.py
 #      is auto-loaded by Python and patches Harbor's ClaudeCode agent class
 #      to enable realtime Opik hooks and fallback trajectory recovery.
@@ -600,8 +599,8 @@ PY
     fi
   fi
 
-  if [[ ! -x "$HARBOR_OPIK_BIN" ]]; then
-    harbor_prepare_runner_cli
+  if ! harbor_runner_cli_ready; then
+    harbor_validate_runner_cli
   fi
 
   local cmd=(
@@ -913,19 +912,17 @@ PY
 }
 
 run_opencode_task() {
-  HARBOR_OPIK_PYTHON="${HARBOR_OPIK_PYTHON:-$HOME/.local/share/uv/tools/opik/bin/python}"
-
   harbor_apply_effective_wheel_source
   if harbor_trace_to_opik_enabled; then
     normalize_opik_url_override
   fi
 
-  if [[ "$TB_DRY_RUN" != "1" && ! -x "$HARBOR_OPIK_BIN" ]]; then
-    harbor_prepare_runner_cli
+  if [[ "$TB_DRY_RUN" != "1" ]] && ! harbor_runner_cli_ready; then
+    harbor_validate_runner_cli
   fi
   if [[ "$TB_DRY_RUN" != "1" && ! -x "$HARBOR_OPIK_PYTHON" ]]; then
     echo "[ERROR] HARBOR_OPIK_PYTHON not executable: $HARBOR_OPIK_PYTHON" >&2
-    echo "[ERROR] set HARBOR_OPIK_PYTHON to the Python inside the opik uv tool env" >&2
+    echo "[ERROR] set HARBOR_OPIK_PYTHON to the Python inside the Harbor runner environment" >&2
     exit 1
   fi
 
@@ -1204,7 +1201,6 @@ main() {
   need_cmd git
   need_cmd curl
   need_cmd python3
-  need_cmd uv
   ensure_docker_daemon
   if harbor_trace_to_opik_enabled; then
     normalize_opik_url_override

@@ -2,7 +2,7 @@
 
 | Script | Purpose |
 | --- | --- |
-| `setup.sh` | One-shot environment bootstrap: installs Node + Claude Code, writes config, installs skills |
+| `setup.sh` | One-shot environment bootstrap: installs Node, Claude Code, and the pinned host Harbor runner; writes config and installs skills |
 | `run_fleet.sh` | Routes tasksets to the existing Harbor or OpenClaw runner |
 | `fleet_spec.sh` | Internal dispatcher for validated single- and multi-run spec inputs |
 | `fleet_batch.sh` | Internal concurrent launcher for normalized multi-run inputs |
@@ -42,9 +42,11 @@ MODEL=glm-5.1-fp8 \
 3. Install Node.js via nvm (if missing or < 18)
 4. Install Claude Code (pinned to 2.1.90)
 5. Write env vars to `~/.bashrc`
-6. Clone the repo + install the skills plugin
-7. Write `config.local.env`
-8. Check Docker permissions
+6. Clone the repo
+7. Create or validate the pinned Harbor/Opik runner environment
+8. Install the skills plugin
+9. Write `config.local.env`
+10. Check Docker permissions
 
 </details>
 
@@ -54,11 +56,16 @@ MODEL=glm-5.1-fp8 \
 - `~/.bashrc`: wrapped in a marker block `# >>> sii-agent-fleet env >>>`, the whole block is replaced each run
 - `~/.claude/settings.json`: managed keys are merged, user customizations preserved
 - `config.local.env`: only managed keys (`BASE_URL` / `API_KEY` / `MODEL`, plus `TRACE_TO_OPIK` and `OPIK_*` when set) are updated; comments and other keys are preserved
+- Host Harbor runner: exact direct dependencies come from `runner-requirements.txt`; a valid environment is reused
 - A backup is taken before each modification (`*.bak.sii-agent-fleet`)
 
 Safe to re-run.
 
 </details>
+
+On a direct host, setup creates the runner under
+`~/.local/share/sii-agent-fleet/harbor-runner`; inside DinD it validates the
+image-owned `/opt/harbor-runner`. Set `HARBOR_RUNNER_SETUP=0` to skip this step.
 
 ---
 
@@ -410,7 +417,7 @@ When invoked inside a container, the launcher warns and delegates directly to
 <summary>Run flow</summary>
 
 1. Load `config.env` → `config.local.env` → restore caller env.
-2. Build the local `sii-agent-fleet-dind:28` image if missing.
+2. Hash the runner image inputs into the default tag, then build it if missing.
 3. Start or reuse a privileged container from that image.
 4. Pass each mirror and default address pool as Docker daemon flags.
 5. Mount the repo at the same absolute path inside DinD.
@@ -433,9 +440,10 @@ When invoked inside a container, the launcher warns and delegates directly to
 | `DIND_REGISTRY_MIRROR` | _(empty)_ | Singular fallback used only when `DIND_REGISTRY_MIRRORS` is unset |
 | `DIND_DEFAULT_ADDRESS_POOLS` | `base=10.200.0.0/13,size=21` from `config.env` | Semicolon-separated Docker daemon default-address-pool specs for nested bridge networks |
 | `DIND_NAME` | `sii-agent-fleet-dind` | DinD container name |
-| `DIND_IMAGE` | `sii-agent-fleet-dind:28` | Prepared DinD runner image; the default is built locally if missing |
+| `DIND_IMAGE` | `sii-agent-fleet-dind:28-<fingerprint>` | Prepared DinD runner image; the default is built locally if missing |
 | `DIND_IMAGE_DOCKERFILE` | `scripts/dind/Dockerfile` | Dockerfile used to build the default DinD runner image |
-| `DIND_BASE_IMAGE` | `m.daocloud.io/docker.io/library/docker:28-dind` | Base image used when building the default image |
+| `DIND_BASE_IMAGE` | pinned Debian 12 slim digest | glibc base image used when building the default image |
+| `DIND_UV_IMAGE` | DaoCloud mirror of `ghcr.io/astral-sh/uv:0.11.28` | Pinned uv image used to install the Harbor runner environment at build time |
 | `DIND_DOCKER_VOLUME` | `<DIND_NAME>-docker` | Persistent `/var/lib/docker` volume for nested image/build cache reuse |
 | `DIND_HOME_VOLUME` | `<DIND_NAME>-home` | Persistent benchmark-user home volume for Claude/plugin setup |
 | `DIND_USER` | `sii` | Unprivileged user that runs `run_fleet.sh`; must exist in `DIND_IMAGE` |
@@ -455,11 +463,10 @@ When invoked inside a container, the launcher warns and delegates directly to
   transfers the benchmark home directory to that user. The wrapper maps that
   user's UID/GID to the calling host user so it can write result files to the
   mounted checkout without changing host file ownership.
-- The default image extends the Docker official DinD image via the DaoCloud
-  prefix and bakes in the README Step 0 launch prerequisites. It is not rebuilt
-  automatically after Dockerfile edits; remove `sii-agent-fleet-dind:28` to
-  force a rebuild, and use `DIND_RESET=1` if an existing DinD container should
-  be recreated from the rebuilt image.
+- The default image uses the pinned Debian 12 slim base and bakes in Docker
+  Engine plus the Harbor runner environment. Its fingerprint changes
+  with the Dockerfile, entrypoint, dependency manifest, or build image references.
+  If an existing container has an older fingerprint, rerun with `DIND_RESET=1`.
 - Does not mount `/var/run/docker.sock`; nested containers use DinD storage.
 - DinD keeps a separate Docker image/build cache, so first runs may be slower
   and use more disk than host Docker. The default persistent

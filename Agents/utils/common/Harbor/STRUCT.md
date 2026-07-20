@@ -16,7 +16,9 @@ Agents/utils/common/Harbor/
 ├── run_harbor_registry.sh      # Registry runner with optional final-pane hold
 ├── harboropik.sh               # Harbor CLI wrapper with Opik setup
 ├── prepare_local_deps.sh       # Local package/cache preparation
-├── harbor_prepare_runner_cli.py
+├── runner-requirements.txt     # Exact direct dependencies for the runner image
+├── setup_runner_env.sh         # Explicit host setup / image validation
+├── harbor_prepare_runner_cli.py # Startup validation for the configured CLI
 ├── harbor_worker_utils.py
 └── scripts/
     ├── monitor.py              # Monitor CLI entrypoint and path resolution
@@ -57,6 +59,15 @@ Agents/utils/rl/
 - `TASKS_DIR`: `REPO_ROOT/Tasks`
 - `HARBOR_CLAUDE_CODE_DIR`: Claude Code integration directory
 - `HARBOR_OPENCODE_DIR`: OpenCode integration directory
+
+## Runner Environment
+
+`scripts/dind/Dockerfile` installs the direct dependencies from
+`runner-requirements.txt` into `/opt/harbor-runner`. For direct host runs,
+`scripts/setup.sh` creates the same environment under
+`~/.local/share/sii-agent-fleet/harbor-runner`. Startup only validates the
+versions and CLIs; task-container dependencies remain owned by
+`prepare_local_deps.sh`.
 
 ## Task Resolution
 

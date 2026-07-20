@@ -206,7 +206,7 @@ finalize_timeout_trace() {
   local logs_dir py normalized_opik_url
   logs_dir="$(find_trial_logs_dir "$result_file" || true)"
   [[ -n "${logs_dir:-}" && -d "$logs_dir" ]] || return 0
-  py="${HARBOR_OPIK_PYTHON:-$HOME/.local/share/uv/tools/opik/bin/python}"
+  py="${HARBOR_OPIK_PYTHON:-/opt/harbor-runner/bin/python}"
   [[ -x "$py" ]] || py="python3"
   normalized_opik_url="${OPIK_URL_OVERRIDE:-${OPIK_URL:-}}"
   normalized_opik_url="${normalized_opik_url%/}"

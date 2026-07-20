@@ -1,0 +1,4 @@
+# Direct dependencies of the Harbor runner control environment.
+# Keep this list small; task-container dependencies are prepared separately.
+harbor==0.18.0
+opik==2.1.32

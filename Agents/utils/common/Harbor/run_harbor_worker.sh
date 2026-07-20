@@ -111,7 +111,7 @@ finalize_timeout_trace() {
     return 0
   }
 
-  py="${HARBOR_OPIK_PYTHON:-$HOME/.local/share/uv/tools/opik/bin/python}"
+  py="${HARBOR_OPIK_PYTHON:-/opt/harbor-runner/bin/python}"
   [[ -x "$py" ]] || py="python3"
 
   # start.sh commonly receives the user-facing Opik base URL without /api, while

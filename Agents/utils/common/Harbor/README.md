@@ -67,6 +67,12 @@ the `third_party/sii-opik-plugin` submodule. Initialize it before a traced run:
 git submodule update --init --recursive
 ```
 
+For a direct host run, first execute `./scripts/setup.sh` from the repository
+root. It creates a pinned Harbor/Opik control environment under
+`~/.local/share/sii-agent-fleet/harbor-runner`. The DinD runner uses the
+image-owned `/opt/harbor-runner` environment instead. Workload startup only
+validates the selected environment and never installs or repairs it.
+
 ## Docker Compose Overlay
 
 Harbor runs task containers through Docker. For DinD runners where the outer
@@ -135,14 +141,19 @@ service uses it to create/reuse one
 without it are rejected instead of being queued without workers.
 
 For Docker usage, publish the listener port and run the same command inside the
-container:
+container. Build the runner directly from this repository first:
 
 ```bash
+docker build \
+  -f scripts/dind/Dockerfile \
+  -t sii-agent-fleet-harbor-runner:local \
+  .
+
 docker run -d --name harbor-rollout \
   -p 19001:19001 \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v /workspace:/workspace \
-  tb-plus-run:latest sleep infinity
+  sii-agent-fleet-harbor-runner:local sleep infinity
 
 docker exec harbor-rollout bash -lc '
   cd /workspace/sii-agent-fleet/Agents/utils/common/Harbor

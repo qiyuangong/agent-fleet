@@ -14,6 +14,7 @@ warn()  { echo -e "\033[1;33m[WARN]\033[0m  $*"; }
 err()   { echo -e "\033[1;31m[FAIL]\033[0m  $*" >&2; }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SOURCE_REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # ---- Hardcoded versions (override via env if needed) ----
 NODE_VERSION="${NODE_VERSION:-24}"
@@ -270,7 +271,22 @@ if [[ ! -d "$REPO_DIR/skills" ]]; then
   exit 1
 fi
 
-# ---- 8. Install skills plugin ----
+# ---- 8. Prepare the pinned host Harbor runner ----
+case "${HARBOR_RUNNER_SETUP:-1}" in
+  1|true|yes)
+    info "Preparing pinned Harbor runner environment..."
+    "$SOURCE_REPO_ROOT/Agents/utils/common/Harbor/setup_runner_env.sh"
+    ;;
+  0|false|no)
+    warn "Skipping Harbor runner setup because HARBOR_RUNNER_SETUP=${HARBOR_RUNNER_SETUP}"
+    ;;
+  *)
+    err "HARBOR_RUNNER_SETUP must be 1 or 0"
+    exit 1
+    ;;
+esac
+
+# ---- 9. Install skills plugin ----
 info "Installing skills plugin..."
 CLAUDE_PLUGIN_DIR="$HOME/.claude/skills/sii-agent-fleet"
 mkdir -p "$CLAUDE_PLUGIN_DIR/.claude-plugin"
@@ -301,7 +317,7 @@ cat > "$CLAUDE_PLUGIN_DIR/.claude-plugin/plugin.json" <<'JSON'
 JSON
 ok "Skills plugin installed to $CLAUDE_PLUGIN_DIR"
 
-# ---- 9. Merge managed keys into config.local.env ----
+# ---- 10. Merge managed keys into config.local.env ----
 # Update only the keys setup.sh manages (BASE_URL/API_KEY/MODEL + tracing/Opik),
 # preserve any other private overrides the user has added (mirrors, etc.).
 # BASE_URL is stored as-is (without /v1), matching the repo convention:
@@ -387,7 +403,7 @@ path.write_text("\n".join(out) + "\n", encoding="utf-8")
 PY
 ok "config.local.env merged; backup at ${CONFIG_LOCAL}.bak.sii-agent-fleet"
 
-# ---- 10. Docker permission check ----
+# ---- 11. Docker permission check ----
 info "Checking Docker permission..."
 if docker ps >/dev/null 2>&1; then
   ok "Docker permission OK"

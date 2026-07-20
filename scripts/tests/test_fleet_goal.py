@@ -387,6 +387,36 @@ exit "${STUB_EXIT:-0}"
         self.assertFalse(capture.exists())
         self.assertNotIn("runner=", result.stdout)
 
+    def test_prompt_output_rejects_empty_path_before_model_call(self):
+        capture = self.root / "claude-capture.txt"
+        result = self.run_goal(
+            "--prompt",
+            "Run pinchbench",
+            "--output",
+            "",
+            extra_env={"CLAUDE_STUB_CAPTURE": str(capture)},
+        )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("non-empty file path", result.stderr)
+        self.assertFalse(capture.exists())
+        self.assertNotIn("runner=", result.stdout)
+
+    def test_prompt_output_rejects_mistyped_option_token_before_model_call(self):
+        capture = self.root / "claude-capture.txt"
+        result = self.run_goal(
+            "--prompt",
+            "Run pinchbench",
+            "--output",
+            "--dryrn",
+            extra_env={"CLAUDE_STUB_CAPTURE": str(capture)},
+        )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("requires a file path", result.stderr)
+        self.assertFalse(capture.exists())
+        self.assertFalse((self.root / "--dryrn").exists())
+
     def test_prompt_output_rejects_option_token_before_model_call(self):
         # `--output --dry-run` is a mangled preview command; consuming the
         # token as a filename silently turned it into a live benchmark run.

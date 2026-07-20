@@ -164,6 +164,111 @@ exit "${STUB_EXIT:-0}"
         )
         self.assertEqual(result.returncode, 17)
 
+    def test_direct_output_writes_replayable_spec_before_runner(self):
+        output = self.root / "fleet-spec.json"
+        result = self.run_fleet(
+            "--taskset",
+            "terminal-bench/terminal-bench-2-1",
+            "--agent",
+            "claude-code",
+            "--workers",
+            "3.0",
+            "--output",
+            str(output),
+            extra_env={"STUB_EXIT": "17"},
+        )
+
+        self.assertEqual(result.returncode, 17)
+        self.assertIn("FleetSpec written", result.stderr)
+        self.assertIn("TOTAL_WORKERS=3", result.stdout)
+        self.assertNotIn("TOTAL_WORKERS=3.0", result.stdout)
+        self.assertEqual(
+            json.loads(output.read_text(encoding="utf-8")),
+            {
+                "schema_version": 1,
+                "taskset": "terminal-bench/terminal-bench-2-1",
+                "agent": "claude-code",
+                "workers": 3,
+            },
+        )
+        self.assertEqual(list(self.root.glob(".fleet-spec.*")), [])
+
+        replay = self.run_fleet("--spec", str(output), "--dry-run")
+        direct = self.run_fleet(
+            "--taskset",
+            "terminal-bench/terminal-bench-2-1",
+            "--agent",
+            "claude-code",
+            "--workers",
+            "3",
+            "--dry-run",
+        )
+        self.assertEqual(replay.returncode, 0, replay.stderr)
+        self.assertEqual(replay.stdout, direct.stdout)
+
+    def test_direct_output_saves_only_explicit_fields(self):
+        output = self.root / "fleet-spec.json"
+        result = self.run_fleet(
+            "-t",
+            "terminalbench21",
+            "-o",
+            str(output),
+            "--dry-run",
+            extra_env={"AGENT": "opencode", "TOTAL_WORKERS": "8"},
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            json.loads(output.read_text(encoding="utf-8")),
+            {"schema_version": 1, "taskset": "terminalbench21"},
+        )
+
+    def test_direct_output_rejects_option_token_before_runner(self):
+        result = self.run_fleet(
+            "--taskset", "pinchbench", "--output", "--dry-run"
+        )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("requires a file path", result.stderr)
+        self.assertNotIn("runner=", result.stdout)
+        self.assertFalse((self.root / "--dry-run").exists())
+
+    def test_direct_output_rejects_mistyped_option_token_before_runner(self):
+        result = self.run_fleet(
+            "--taskset", "pinchbench", "--output", "--dryrn"
+        )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("requires a file path", result.stderr)
+        self.assertNotIn("runner=", result.stdout)
+        self.assertFalse((self.root / "--dryrn").exists())
+
+    def test_direct_output_accepts_dash_prefixed_path_with_dot_slash(self):
+        result = self.run_fleet(
+            "--taskset", "pinchbench", "--output", "./--dryrn", "--dry-run"
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((self.root / "--dryrn").exists())
+
+    def test_direct_output_rejects_empty_path(self):
+        result = self.run_fleet("--taskset", "pinchbench", "--output", "")
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("non-empty file path", result.stderr)
+        self.assertNotIn("runner=", result.stdout)
+
+    def test_direct_output_requires_existing_directory_before_runner(self):
+        output = self.root / "missing" / "fleet-spec.json"
+        result = self.run_fleet(
+            "--taskset", "pinchbench", "--output", str(output)
+        )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("output directory does not exist", result.stderr)
+        self.assertNotIn("runner=", result.stdout)
+        self.assertFalse(output.exists())
+
     def test_harbor_dry_run_prints_command_without_starting_runner(self):
         result = self.run_fleet(
             "--taskset",
@@ -273,6 +378,25 @@ exit "${STUB_EXIT:-0}"
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("TOTAL_WORKERS=3", result.stdout)
         self.assertNotIn("TOTAL_WORKERS=3.0", result.stdout)
+
+    def test_spec_output_writes_normalized_copy(self):
+        output = self.root / "normalized.json"
+        result = self.run_fleet(
+            "--spec",
+            "-",
+            "--output",
+            str(output),
+            "--dry-run",
+            input_text=json.dumps(
+                {"schema_version": 1, "taskset": "pinchbench", "workers": 3.0}
+            ),
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            json.loads(output.read_text(encoding="utf-8")),
+            {"schema_version": 1, "taskset": "pinchbench", "workers": 3},
+        )
 
     def test_spec_rejects_direct_argument_overrides(self):
         result = self.run_fleet(

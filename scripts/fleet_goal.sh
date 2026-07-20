@@ -3,6 +3,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="${REPO_DIR:-$(cd "$SCRIPT_DIR/.." && pwd)}"
+# shellcheck source=fleet_spec_io.sh
+source "$SCRIPT_DIR/fleet_spec_io.sh"
 
 usage() {
   cat <<EOF
@@ -18,13 +20,6 @@ EOF
 }
 
 err() { printf '[ERROR] %s\n' "$*" >&2; }
-
-is_recognized_option() {
-  case "$1" in
-    -p|--prompt|-o|--output|-d|--detach|--dry-run|-h|--help) return 0 ;;
-    *) return 1 ;;
-  esac
-}
 
 load_config() {
   local entry file name
@@ -48,7 +43,7 @@ load_config() {
   done
 }
 
-PROMPT="" OUTPUT="" output_dir="" DETACH=0 DRY_RUN=0
+PROMPT="" OUTPUT="" DETACH=0 DRY_RUN=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -p|--prompt)
@@ -56,12 +51,8 @@ while [[ $# -gt 0 ]]; do
       PROMPT="$2"; shift 2
       ;;
     -o|--output)
-      [[ $# -ge 2 ]] || { err "--output requires a file path"; exit 2; }
-      # A recognized option token here is a mangled command line, not a
-      # filename; silently consuming it turns an intended preview into a
-      # live run. A file literally named like an option stays expressible
-      # as ./--dry-run.
-      if is_recognized_option "$2"; then
+      [[ $# -ge 2 && -n "$2" ]] || { err "--output requires a non-empty file path"; exit 2; }
+      if fleet_spec_is_option_shaped "$2"; then
         err "--output requires a file path; use ./$2 for a file literally named $2"
         exit 2
       fi
@@ -75,12 +66,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -n "${PROMPT//[[:space:]]/}" ]] || { err "--prompt must not be empty"; exit 2; }
-if [[ -n "$OUTPUT" ]]; then
-  [[ "$OUTPUT" != "-" ]] || { err "--output requires a file path, not -"; exit 2; }
-  output_dir="$(dirname -- "$OUTPUT")"
-  [[ -d "$output_dir" ]] || { err "output directory does not exist: $output_dir"; exit 2; }
-  [[ ! -d "$OUTPUT" ]] || { err "output path is a directory: $OUTPUT"; exit 2; }
-fi
+fleet_spec_validate_output_path "$OUTPUT" || exit $?
 for cmd in claude jq; do
   command -v "$cmd" >/dev/null 2>&1 || {
     err "missing command: $cmd; run scripts/setup.sh"
@@ -213,14 +199,6 @@ if ! spec="$(jq -ce -L "$SCRIPT_DIR" '
 fi
 
 formatted="$(jq . <<<"$spec")"
-if [[ -n "$OUTPUT" ]]; then
-  tmp_file="$(mktemp "$output_dir/.fleet-spec.XXXXXX")"
-  trap 'rm -f -- "$tmp_file"' EXIT
-  printf '%s\n' "$formatted" >"$tmp_file"
-  mv -f -- "$tmp_file" "$OUTPUT"
-  trap - EXIT
-  printf '[INFO] FleetSpec written: %s\n' "$OUTPUT" >&2
-fi
 
 # Echo the interpretation before execution: the model may have resolved the
 # prompt differently than the user meant, and a detached runner leaves no
@@ -239,6 +217,7 @@ rm -f -- "$spec_file"
 trap - EXIT
 
 run_args=(--spec /dev/fd/3)
+[[ -z "$OUTPUT" ]] || run_args+=(--output "$OUTPUT")
 (( DETACH )) && run_args+=(--detach)
 (( DRY_RUN )) && run_args+=(--dry-run)
 # exec keeps the runner on this PID, matching the direct/spec path: a

@@ -65,8 +65,8 @@ Safe to re-run.
 ### Fleet launch modes
 
 ```bash
-./scripts/run_fleet.sh --taskset <taskset> [--agent <agent>] [--workers <n>] [--detach] [--dry-run]
-./scripts/run_fleet.sh --spec <file|-> [--detach] [--dry-run]
+./scripts/run_fleet.sh --taskset <taskset> [--agent <agent>] [--workers <n>] [--output <file>] [--detach] [--dry-run]
+./scripts/run_fleet.sh --spec <file|-> [--output <file>] [--detach] [--dry-run]
 ./scripts/run_fleet.sh --prompt <text> [--output <file>] [--detach] [--dry-run]
 ```
 
@@ -78,7 +78,7 @@ Safe to re-run.
 | `-s, --spec <file|->` | Read a FleetSpec v1 JSON object from a file or standard input |
 | `-d, --detach` | Start Harbor in its detached Zellij mode; ignored with a warning for OpenClaw tasksets |
 | `-p, --prompt <text>` | Translate, validate, and run one natural-language benchmark request |
-| `-o, --output <file>` | Save Prompt mode's validated FleetSpec before running it |
+| `-o, --output <file>` | Atomically save the validated FleetSpec before running it |
 | `--dry-run` | Print the downstream command and environment without running it |
 
 Every short flag behaves exactly like its long form, for example:
@@ -97,7 +97,7 @@ Examples:
 ./scripts/run_fleet.sh --taskset pinchbench --agent openclaw --workers 10
 ./scripts/run_fleet.sh --taskset clawbio --agent openclaw --workers 10
 ./scripts/run_fleet.sh --taskset terminal-bench/terminal-bench-2-1 \
-  --agent claude-code --workers 10 --dry-run
+  --agent claude-code --workers 10 --output fleet-spec.json --dry-run
 ```
 
 ### FleetSpec JSON
@@ -120,6 +120,27 @@ Create `fleet-spec.json` with any text editor, for example
 | `taskset` | Yes | Registry ID, explicit local path, `pinchbench`, or `clawbio` |
 | `agent` | No | Agent passed to the selected runner |
 | `workers` | No | Integer from 1 to 4096 |
+
+Taskset mode can build and save the same JSON directly from its explicit CLI
+arguments:
+
+```bash
+./scripts/run_fleet.sh \
+  --taskset terminal-bench/terminal-bench-2-1 \
+  --agent claude-code --workers 3 \
+  --output fleet-spec.json --dry-run
+```
+
+Only explicitly supplied `taskset`, `agent`, and `workers` values are saved.
+Caller environment defaults and invocation controls such as `--detach` and
+`--dry-run` are not FleetSpec fields. The output is written after validation
+and before the selected runner starts, so it remains available if the runner
+later fails.
+
+Note that `--output` applies FleetSpec validation to the taskset arguments:
+the run then uses the validated values (for example `--workers 3.0` runs with
+`3`), whereas without `--output` Direct mode passes arguments through to the
+runner unvalidated.
 
 Preview the resolved command, then run it:
 
@@ -152,8 +173,8 @@ JSON
 ```
 
 Spec input cannot be combined with `--taskset`, `--agent`, or `--workers`.
-Multiple JSON values, unknown fields, control characters, and invalid values
-are rejected.
+It can be combined with `--output` to write a normalized copy. Multiple JSON
+values, unknown fields, control characters, and invalid values are rejected.
 
 ### Prompt execution
 

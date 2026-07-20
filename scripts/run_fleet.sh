@@ -3,6 +3,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="${REPO_DIR:-$(cd "$SCRIPT_DIR/.." && pwd)}"
+# shellcheck source=fleet_spec_io.sh
+source "$SCRIPT_DIR/fleet_spec_io.sh"
 [[ "${1:-}" != "--prompt" && "${1:-}" != "-p" ]] || exec bash "$SCRIPT_DIR/fleet_goal.sh" "$@"
 for arg in "$@"; do
   if [[ "$arg" == "--prompt" || "$arg" == "-p" ]]; then
@@ -13,8 +15,8 @@ done
 usage() {
   cat <<EOF
 Usage:
-  $0 --taskset <taskset> [--agent <agent>] [--workers <n>] [--detach] [--dry-run]
-  $0 --spec <file|-> [--detach] [--dry-run]
+  $0 --taskset <taskset> [--agent <agent>] [--workers <n>] [--output <file>] [--detach] [--dry-run]
+  $0 --spec <file|-> [--output <file>] [--detach] [--dry-run]
   $0 --prompt <text> [--output <file>] [--detach] [--dry-run]
 
 Short flags: -t --taskset, -a --agent, -n --workers, -s --spec, -p --prompt,
@@ -30,40 +32,6 @@ Examples:
 EOF
 }
 
-load_spec() {
-  local source="$1" spec_json
-
-  command -v jq >/dev/null 2>&1 || {
-    printf '[ERROR] jq is required to read FleetSpec JSON\n' >&2
-    return 1
-  }
-  if [[ "$source" == "-" ]]; then
-    spec_json="$(cat)"
-  elif [[ -f "$source" && -r "$source" ]]; then
-    spec_json="$(cat -- "$source")"
-  else
-    printf '[ERROR] FleetSpec is not readable: %s\n' "$source" >&2
-    return 2
-  fi
-
-  if ! spec_json="$(jq -ces -L "$SCRIPT_DIR" '
-    include "fleet_spec_validate";
-    if length == 1 then (.[0] | fleet_spec_v1)
-    else error("invalid FleetSpec") end
-  ' <<<"$spec_json" 2>/dev/null)"; then
-    printf '[ERROR] invalid FleetSpec v1: %s\n' "$source" >&2
-    printf '[ERROR] expected schema_version=1, taskset, optional agent/workers, and no other fields\n' >&2
-    return 2
-  fi
-
-  TASKSET="$(jq -r '.taskset' <<<"$spec_json")"
-  AGENT_ARG="$(jq -r 'if has("agent") then .agent else "" end' <<<"$spec_json")"
-  # floor normalizes integral floats (3.0 -> "3"); otherwise the spec value
-  # flows downstream as TOTAL_WORKERS=3.0, which breaks bash arithmetic and
-  # pinchbench's integer --instances parsing.
-  WORKERS="$(jq -r 'if has("workers") then (.workers | floor | tostring) else "" end' <<<"$spec_json")"
-}
-
 run_command() {
   if (( DRY_RUN )); then
     printf 'Command:'
@@ -74,7 +42,14 @@ run_command() {
   exec "$@"
 }
 
-TASKSET="" AGENT_ARG="" WORKERS="" SPEC_SOURCE="" DETACH=0 DRY_RUN=0
+apply_fleet_spec() {
+  TASKSET="$(jq -r '.taskset' <<<"$FLEET_SPEC_JSON")"
+  AGENT_ARG="$(jq -r 'if has("agent") then .agent else "" end' <<<"$FLEET_SPEC_JSON")"
+  WORKERS="$(jq -r 'if has("workers") then (.workers | tostring) else "" end' <<<"$FLEET_SPEC_JSON")"
+}
+
+TASKSET="" AGENT_ARG="" WORKERS="" SPEC_SOURCE="" OUTPUT="" FLEET_SPEC_JSON=""
+DETACH=0 DRY_RUN=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -85,6 +60,14 @@ while [[ $# -gt 0 ]]; do
       [[ $# -ge 2 ]] || { printf '[ERROR] --spec requires a file path or -\n' >&2; exit 2; }
       SPEC_SOURCE="$2"; shift 2
       ;;
+    -o|--output)
+      [[ $# -ge 2 && -n "$2" ]] || { printf '[ERROR] --output requires a non-empty file path\n' >&2; exit 2; }
+      if fleet_spec_is_option_shaped "$2"; then
+        printf '[ERROR] --output requires a file path; use ./%s for a file literally named %s\n' "$2" "$2" >&2
+        exit 2
+      fi
+      OUTPUT="$2"; shift 2
+      ;;
     -d|--detach) DETACH=1; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -92,15 +75,25 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+fleet_spec_validate_output_path "$OUTPUT" || exit $?
+
 if [[ -n "$SPEC_SOURCE" ]]; then
   if [[ -n "$TASKSET" || -n "$AGENT_ARG" || -n "$WORKERS" ]]; then
     printf '[ERROR] --spec cannot be combined with --taskset, --agent, or --workers\n' >&2
     exit 2
   fi
-  load_spec "$SPEC_SOURCE"
+  fleet_spec_load "$SPEC_SOURCE"
+  apply_fleet_spec
 fi
 
 [[ -n "$TASKSET" ]] || { usage >&2; exit 2; }
+if [[ -n "$OUTPUT" ]]; then
+  if [[ -z "$FLEET_SPEC_JSON" ]]; then
+    fleet_spec_from_taskset_args "$TASKSET" "$AGENT_ARG" "$WORKERS"
+    apply_fleet_spec
+  fi
+  fleet_spec_write "$OUTPUT" "$FLEET_SPEC_JSON"
+fi
 
 REQUESTED_AGENT="${AGENT_ARG:-${AGENT:-}}"
 if [[ "$TASKSET" == "pinchbench" || "$TASKSET" == "clawbio" ]] &&

@@ -41,3 +41,7 @@ scripts/logs/
 
 # Local assistant artifacts
 .claude/
+
+# Local analyzer validation artifacts
+.tmp-*/
+analyzer-issue109-comment-*.md

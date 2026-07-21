@@ -147,6 +147,7 @@ def build_analyzer_handover(
         fingerprint_payload = {
             "task_index": task.get("task_index"),
             "task_name": task.get("task_name"),
+            "attempt_id": task.get("attempt_id"),
             "result_path": task.get("result_path"),
             "task_complete_status": task.get("task_complete_status"),
             "task_result_signals": task.get("task_result_signals"),

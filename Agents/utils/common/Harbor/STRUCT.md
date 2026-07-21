@@ -19,6 +19,8 @@ Agents/utils/common/Harbor/
 ├── harbor_worker_utils.py
 └── scripts/
     ├── monitor.py              # Monitor CLI entrypoint and path resolution
+    ├── analyzer_subagent.py    # Analyzer entrypoint for Pi/GLM-5.2 root-cause analysis
+    ├── harbor_analyzer/        # Contract validation, fixed prompt, Pi dispatch, output validation
     ├── harbor_monitor/
     │   ├── artifacts.py        # Queue, result, manifest, environment, and state I/O
     │   ├── classification.py   # Task and benchmark status classification
@@ -27,6 +29,10 @@ Agents/utils/common/Harbor/
     │   └── runner.py           # Control commands, retries, and follow loop
     └── online_rule_analyzer.py # Optional console-only online analysis
 ```
+
+Analyzer architecture and output boundaries are documented in
+[ANALYZER_ARCHITECTURE.md](ANALYZER_ARCHITECTURE.md). Analyzer credentials stay
+in the environment as `HARBOR_ANALYZER_*` variables.
 
 ```text
 Agents/utils/rl/

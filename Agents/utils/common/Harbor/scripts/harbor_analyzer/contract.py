@@ -20,6 +20,17 @@ def _resolved(value: str) -> Path:
     return Path(value).expanduser().resolve()
 
 
+def _is_contained(path: Path, roots: list[Path]) -> bool:
+    return any(path == root or root in path.parents for root in roots)
+
+
+def _resolve_task_result_path(value: str, *, run_dir: Path) -> Path:
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        path = run_dir / path
+    return path.resolve()
+
+
 def validate_handover(
     handover: dict[str, Any],
     *,
@@ -107,6 +118,10 @@ def validate_handover(
         except OSError:
             errors.append("paths_queue_dir_invalid")
 
+    evidence_roots = [run_dir.resolve()]
+    if queue_dir is not None:
+        evidence_roots.append(queue_dir.resolve())
+
     validated: list[dict[str, Any]] = []
     identities: set[tuple[str, str, str]] = set()
     for index, raw_task in enumerate(tasks):
@@ -125,6 +140,15 @@ def validate_handover(
             errors.append(f"task_{index}_status_not_analyzable")
         if status in skip_statuses:
             errors.append(f"task_{index}_status_is_skipped")
+        result_path = task.get("result_path")
+        if isinstance(result_path, str) and result_path.strip():
+            try:
+                resolved_result_path = _resolve_task_result_path(result_path, run_dir=run_dir)
+            except OSError:
+                errors.append(f"task_{index}_result_path_invalid")
+            else:
+                if not _is_contained(resolved_result_path, evidence_roots):
+                    errors.append(f"task_{index}_result_path_outside_evidence_roots")
         signals = task.get("task_result_signals")
         if not isinstance(signals, list) or not all(isinstance(value, str) for value in signals):
             errors.append(f"task_{index}_signals_must_be_string_array")

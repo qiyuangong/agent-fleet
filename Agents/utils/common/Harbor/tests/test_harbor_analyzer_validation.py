@@ -236,6 +236,16 @@ class HarborAnalyzerValidationTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "status_policy"):
                 validate_handover(payload, run_dir=run_dir, queue_dir=queue_dir)
 
+    def test_validate_handover_rejects_result_path_outside_evidence_roots(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            run_dir = Path(root) / "run"
+            queue_dir = run_dir / "queue"
+            payload = handover(run_dir, queue_dir)
+            payload["tasks"][0]["result_path"] = "/etc/passwd"
+
+            with self.assertRaisesRegex(ValueError, "result_path_outside_evidence_roots"):
+                validate_handover(payload, run_dir=run_dir, queue_dir=queue_dir)
+
     def test_validate_final_json_accepts_complete_env_infra_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as root:
             report = env_task_analysis(Path(root) / "job.log")

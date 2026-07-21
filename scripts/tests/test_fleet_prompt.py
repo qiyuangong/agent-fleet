@@ -103,21 +103,23 @@ exit "${STUB_EXIT:-0}"
         self.temp_dir.cleanup()
 
     @staticmethod
-    def response(*, ready=True, message="", spec=None):
-        if spec is None:
-            spec = {
+    def response(*, ready=True, message="", spec=None, specs=None):
+        if specs is None and ready:
+            specs = [spec or {
                 "schema_version": 1,
                 "taskset": "terminal-bench/terminal-bench-2",
                 "agent": "claude-code",
                 "workers": 2,
-            }
+            }]
+        elif specs is None:
+            specs = []
         return json.dumps(
             {
                 "type": "result",
                 "structured_output": {
                     "ready": ready,
                     "message": message,
-                    "spec": spec,
+                    "specs": specs,
                 },
             }
         )
@@ -228,6 +230,150 @@ exit "${STUB_EXIT:-0}"
         self.assertIn(f"arg=<{goal}>", captured)
         self.assertIn("Terminus-2", captured)
         self.assertIn("return ready=false", captured)
+        self.assertIn('"specs"', captured)
+        self.assertIn('"maxItems": 16', captured)
+
+    def test_prompt_multiple_specs_run_through_spec_dispatch_and_write_array(self):
+        output = self.root / "fleet-specs.json"
+        result = self.run_goal(
+            "--prompt",
+            "Run terminalbench21 once with claude-code and once with opencode, both with 2 workers",
+            "--output",
+            str(output),
+            "--detach",
+            response=self.response(
+                specs=[
+                    {
+                        "schema_version": 1,
+                        "taskset": "terminalbench21",
+                        "agent": "claude-code",
+                        "workers": 2,
+                    },
+                    {
+                        "schema_version": 1,
+                        "taskset": "terminalbench21",
+                        "agent": "opencode",
+                        "workers": 2,
+                    },
+                ]
+            ),
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            json.loads(output.read_text(encoding="utf-8")),
+            [
+                {
+                    "schema_version": 1,
+                    "taskset": "terminalbench21",
+                    "agent": "claude-code",
+                    "workers": 2,
+                },
+                {
+                    "schema_version": 1,
+                    "taskset": "terminalbench21",
+                    "agent": "opencode",
+                    "workers": 2,
+                },
+            ],
+        )
+        self.assertIn('[INFO] FleetSpec [1/2]:', result.stderr)
+        self.assertIn('[INFO] FleetSpec [2/2]:', result.stderr)
+        self.assertIn("--detach is implicit", result.stderr)
+        artifact_dirs = list((self.root / "fleet-batch-logs").iterdir())
+        self.assertEqual(len(artifact_dirs), 1)
+        first_log = (artifact_dirs[0] / "1.log").read_text(encoding="utf-8")
+        second_log = (artifact_dirs[0] / "2.log").read_text(encoding="utf-8")
+        self.assertIn("AGENT=claude-code", first_log)
+        self.assertIn("AGENT=opencode", second_log)
+        self.assertIn("TOTAL_WORKERS=2", first_log)
+        self.assertIn("args=--detach", first_log)
+        self.assertIn("args=--detach", second_log)
+
+    def test_prompt_has_no_separate_batch_entrypoint(self):
+        prompt_script = (SCRIPT.parent / "fleet_prompt.sh").read_text(encoding="utf-8")
+
+        self.assertIn("run_args=(--spec /dev/fd/3)", prompt_script)
+        self.assertNotIn("--batch", prompt_script)
+        self.assertNotIn("fleet_batch.sh", prompt_script)
+
+    def test_prompt_multiple_specs_dry_run_starts_no_runner(self):
+        result = self.run_goal(
+            "--prompt",
+            "Run owner/first and owner/second",
+            "--dry-run",
+            response=self.response(
+                specs=[
+                    {"schema_version": 1, "taskset": "owner/first"},
+                    {"schema_version": 1, "taskset": "owner/second"},
+                ]
+            ),
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.count("Command: env"), 2)
+        self.assertNotIn("runner=harbor", result.stdout)
+        artifact_dirs = list((self.root / "fleet-batch-logs").iterdir())
+        self.assertEqual(len(artifact_dirs), 1)
+        self.assertEqual(list(artifact_dirs[0].glob("*.log")), [])
+
+    def test_prompt_multiple_specs_return_aggregate_failure(self):
+        result = self.run_goal(
+            "--prompt",
+            "Run owner/first and owner/second",
+            response=self.response(
+                specs=[
+                    {"schema_version": 1, "taskset": "owner/first"},
+                    {"schema_version": 1, "taskset": "owner/second"},
+                ]
+            ),
+            extra_env={"STUB_EXIT": "17"},
+        )
+
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stderr.count("FAILED(17)"), 2)
+
+    def test_prompt_multiple_openclaw_specs_are_rejected_before_output(self):
+        output = self.root / "fleet-specs.json"
+        result = self.run_goal(
+            "--prompt",
+            "Run pinchbench and clawbio",
+            "--output",
+            str(output),
+            response=self.response(
+                specs=[
+                    {"schema_version": 1, "taskset": "pinchbench"},
+                    {"schema_version": 1, "taskset": "clawbio"},
+                ]
+            ),
+        )
+
+        self.assertEqual(result.returncode, 3)
+        self.assertIn("at most one OpenClaw run", result.stderr)
+        self.assertNotIn("[INFO] FleetSpec", result.stderr)
+        self.assertFalse(output.exists())
+        self.assertFalse((self.root / "fleet-batch-logs").exists())
+        self.assertNotIn("runner=", result.stdout)
+
+    def test_prompt_rejects_multi_run_when_one_spec_is_invalid(self):
+        output = self.root / "fleet-specs.json"
+        result = self.run_goal(
+            "--prompt",
+            "Run owner/valid and another invalid run",
+            "--output",
+            str(output),
+            response=self.response(
+                specs=[
+                    {"schema_version": 1, "taskset": "owner/valid"},
+                    {"schema_version": 1, "taskset": ""},
+                ]
+            ),
+        )
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("invalid FleetSpec", result.stderr)
+        self.assertFalse(output.exists())
+        self.assertFalse((self.root / "fleet-batch-logs").exists())
 
     def test_goal_needing_input_does_not_write_a_spec(self):
         output = self.root / "fleet-spec.json"
@@ -239,7 +385,6 @@ exit "${STUB_EXIT:-0}"
             response=self.response(
                 ready=False,
                 message="Which taskset should be run?",
-                spec={"schema_version": 1, "taskset": ""},
             ),
         )
 
@@ -506,6 +651,13 @@ exit "${STUB_EXIT:-0}"
         self.assertIn("requires a file path", result.stderr)
         self.assertNotIn("runner=", result.stdout)
 
+    def test_spec_option_token_rejected_as_prompt_output_value(self):
+        result = self.run_goal("-p", "Run pinchbench", "-o", "--spec")
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("requires a file path", result.stderr)
+        self.assertNotIn("runner=", result.stdout)
+
     def test_unsupported_terminus_prompt_does_not_write_a_spec(self):
         output = self.root / "fleet-spec.json"
         result = self.run_goal(
@@ -516,7 +668,6 @@ exit "${STUB_EXIT:-0}"
             response=self.response(
                 ready=False,
                 message="Terminus-2 is not a supported Harbor agent.",
-                spec={"schema_version": 1, "taskset": ""},
             ),
         )
 

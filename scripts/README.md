@@ -228,10 +228,11 @@ own any resulting resource conflicts and failures.
 
 ### Prompt execution
 
-Prompt mode uses the configured model only to translate natural language into a
-FleetSpec. After local validation succeeds, the shell passes that JSON to the
-existing `--spec` path and runs the selected Harbor or OpenClaw runner. The
-model never receives tools and never constructs or executes the runner command.
+Prompt mode uses the configured model only to translate natural language into
+one or more FleetSpecs. After local validation succeeds, every result uses the
+same `--spec` path, which automatically selects single- or multi-run execution.
+The model never receives tools and never constructs or executes the runner
+command.
 
 ```bash
 # Translate, validate, and run immediately.
@@ -242,6 +243,11 @@ model never receives tools and never constructs or executes the runner command.
 ./scripts/run_fleet.sh \
   --prompt "Run terminal-bench/terminal-bench-2 with claude-code and 2 workers" \
   --output fleet-spec.json --dry-run
+
+# Translate two explicit runs and launch both.
+./scripts/run_fleet.sh \
+  --prompt "Run terminalbench21 once with claude-code and once with opencode; use 2 workers for both" \
+  --output fleet-specs.json
 ```
 
 `--prompt` (or `-p`) must be the first argument; if it appears later,
@@ -249,13 +255,12 @@ model never receives tools and never constructs or executes the runner command.
 generic usage error. Prompt mode also accepts `--output`, `--detach`, and
 `--dry-run`.
 
-Before execution, Prompt mode prints the validated FleetSpec to standard error
-as one `[INFO] FleetSpec: {...}` line, so the model's interpretation is visible
-even when the runner detaches. Standard output stays reserved for the runner.
-With `--output`, the same JSON is also atomically written to the selected file
-before the runner starts. `--dry-run` still calls the translation model and validates
-the result, but the existing runner prints its resolved command instead of
-starting it. `--detach` is forwarded through the same execution path.
+Before execution, Prompt mode prints each validated FleetSpec to standard
+error. A single run keeps the exact `[INFO] FleetSpec: {...}` format; multiple
+runs use `[INFO] FleetSpec [i/N]: {...}`. With `--output`, one run writes a JSON
+object and multiple runs write an array that can be replayed with `--spec`.
+`--dry-run` still calls the translation model and validates the result, but only
+prints the resolved runner commands. Multi-run execution implies Harbor detach.
 
 Prompt mode loads `config.env` and then `config.local.env`; caller environment
 variables still take precedence. `BASE_URL`, `API_KEY`, and `MODEL` must be
@@ -263,15 +268,17 @@ configured. When the shell uses an HTTP proxy for external traffic, add an
 internal model gateway hostname to `NO_PROXY`; Prompt mode preserves the
 caller's proxy policy and does not change it automatically.
 
-FleetSpec v1 describes one run and only supports `taskset`, optional `agent`,
-and optional `workers`. The translator asks for clarification instead of
-guessing when the taskset is missing or ambiguous, multiple runs are requested,
-or the prompt contains requirements that v1 cannot represent. Use `--output`
-with `--dry-run` when the generated JSON must be reviewed before execution.
+Each FleetSpec v1 describes one run and only supports `taskset`, optional
+`agent`, and optional `workers`. A prompt may explicitly request up to 16 runs;
+the translator emits one spec per run without inventing defaults or additional
+combinations. It asks for clarification when a taskset is missing or ambiguous,
+or the prompt contains requirements that FleetSpec v1 cannot represent.
 
 Prompt mode supports `claude-code` and `opencode` for Harbor tasksets and
 `openclaw` for `pinchbench` or `clawbio`. It reports other requested agents as
-unsupported instead of producing a spec that would fail after Harbor starts.
+unsupported instead of producing a spec that would fail after Harbor starts. A
+Prompt batch may contain at most one OpenClaw run because those runners share
+one fleet; additional OpenClaw runs are rejected before display or output.
 
 Prompt mode never creates or overwrites an output file, and never starts a
 runner, when translation, structured-output validation, FleetSpec validation,
@@ -281,16 +288,21 @@ Prompt mode exit codes: `0` — the runner or dry-run succeeded; `2` — invalid
 usage; `3` — the prompt needs clarification or requests an unsupported feature
 (the question or limitation is printed to standard error); `1` — missing tools
 or model configuration, or the model did not return a valid translation. Once
-execution begins, any non-zero downstream runner exit code is returned unchanged.
+execution begins, a single run returns its downstream runner exit code unchanged.
+Multiple runs return Batch's aggregate status: `0` when every child succeeds or
+`1` when any child fails, with each downstream code shown in the Batch summary.
 
 Prompt execution does not run setup or preflight checks, prepare datasets or
 images, repair configuration, create monitoring, or analyze results. Those
 responsibilities remain with the selected runner and its existing environment.
 
-In `--taskset` and `--spec` modes, `run_fleet.sh` only parses the input, maps it
-to the selected runner, and replaces itself with that runner. It does not
-generate run IDs, create output directories, create or monitor sessions, filter
-tasks, run preflight checks, or translate downstream errors.
+In `--taskset` mode and single-spec `--spec` mode, `run_fleet.sh` only parses
+the input, maps it to the selected runner, and replaces itself with that
+runner. It does not generate run IDs, create output directories, create or
+monitor sessions, filter tasks, run preflight checks, or translate downstream
+errors. Multi-run `--spec` input is the documented exception: it dispatches
+through Batch, which generates per-run `RUN_ID`s, writes launch artifacts and
+logs, and starts detached Harbor sessions as described above.
 
 Harbor tasksets call `Agents/utils/common/Harbor/start.sh`. Local tasksets must
 use an explicit path beginning with `./`, `../`, `/`, or `~/`. Harbor owns its

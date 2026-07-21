@@ -94,7 +94,17 @@ print("runner=pinchbench")
 
         clawbio = self.repo / "Tasks/clawBio/scripts/run-openclaw-clawbio.sh"
         clawbio.parent.mkdir(parents=True)
-        clawbio.write_text("#!/usr/bin/env bash\nprintf 'runner=clawbio\\n'\n", encoding="utf-8")
+        clawbio.write_text(
+            """#!/usr/bin/env bash
+printf 'runner=clawbio\\n'
+if [[ -n "${STUB_GRANDCHILD_PID_FILE:-}" ]]; then
+  # Mirror the real launcher shape: the benchmark work runs in a foreground
+  # grandchild of the launcher shell.
+  bash -c 'echo "$$" >"$STUB_GRANDCHILD_PID_FILE"; trap "exit 0" TERM INT HUP; while true; do sleep 0.05; done'
+fi
+""",
+            encoding="utf-8",
+        )
 
     def tearDown(self):
         self.temp_dir.cleanup()
@@ -335,6 +345,55 @@ print("runner=pinchbench")
 
     def test_int_is_forwarded_to_foreground_child_and_reaped(self):
         self.assert_signal_is_forwarded_and_child_reaped(signal.SIGINT, 130)
+
+    def test_term_reaches_foreground_grandchildren(self):
+        # The real ClawBio launcher does its work in grandchildren; killing
+        # only the launcher PID orphans them. The batch signals the whole
+        # process group, so the grandchild must die with the launcher.
+        spec = self.write_spec("clawbio.json", "clawbio")
+        grand_pid_file = self.root / "grandchild.pid"
+        env = self.batch_env()
+        env["STUB_GRANDCHILD_PID_FILE"] = str(grand_pid_file)
+        process = subprocess.Popen(
+            [str(SCRIPT), "--spec", str(spec)],
+            cwd=self.root,
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        grand_pid = None
+        try:
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline and not grand_pid_file.exists():
+                if process.poll() is not None:
+                    break
+                time.sleep(0.05)
+            self.assertTrue(grand_pid_file.exists(), "grandchild did not start")
+            grand_pid = int(grand_pid_file.read_text(encoding="utf-8"))
+
+            process.send_signal(signal.SIGTERM)
+            _, stderr = process.communicate(timeout=5)
+
+            self.assertEqual(process.returncode, 143, stderr)
+            deadline = time.monotonic() + 2
+            while time.monotonic() < deadline:
+                try:
+                    os.kill(grand_pid, 0)
+                except ProcessLookupError:
+                    break
+                time.sleep(0.05)
+            else:
+                self.fail(f"foreground grandchild {grand_pid} survived cancellation")
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait(timeout=5)
+            if grand_pid is not None:
+                try:
+                    os.kill(grand_pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
 
     def test_dry_run_prints_commands_without_starting_runner(self):
         first = self.write_spec("first.json", "owner/first")

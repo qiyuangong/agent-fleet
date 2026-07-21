@@ -155,7 +155,12 @@ terminate_children() {
   for ((i = 0; i < PID_COUNT; i++)); do
     pid="${PIDS[$i]}"
     kill -0 "$pid" >/dev/null 2>&1 || continue
-    kill "-$signal_name" "$pid" >/dev/null 2>&1 || true
+    # Children are process-group leaders (spawned under job control), so
+    # signal the whole group: foreground runners like ClawBio do their work
+    # in grandchildren, and signalling only the launcher PID orphans that
+    # work mid-run.
+    kill -s "$signal_name" -- "-$pid" >/dev/null 2>&1 \
+      || kill -s "$signal_name" "$pid" >/dev/null 2>&1 || true
   done
   for ((i = 0; i < PID_COUNT; i++)); do
     wait "${PIDS[$i]}" >/dev/null 2>&1 || true
@@ -172,6 +177,10 @@ trap 'handle_signal HUP 129' HUP
 trap 'handle_signal INT 130' INT
 trap 'handle_signal TERM 143' TERM
 
+# Job control makes each background child the leader of its own process
+# group, so cancellation can signal complete process trees instead of only
+# the launcher PIDs.
+set -m
 for ((i = 0; i < TOTAL; i++)); do
   child_env "$i"
   env "${CHILD_ENV[@]}" \
@@ -180,6 +189,7 @@ for ((i = 0; i < TOTAL; i++)); do
   PIDS[$i]=$!
   PID_COUNT=$((PID_COUNT + 1))
 done
+set +m
 
 failed=0
 for ((i = 0; i < TOTAL; i++)); do

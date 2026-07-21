@@ -67,6 +67,52 @@ fleet_spec_load() {
   fi
 }
 
+fleet_spec_load_many() {
+  local source spec_json normalized
+  local normalized_inputs=()
+  [[ $# -gt 0 ]] || {
+    printf '[ERROR] --spec requires at least one file path or -\n' >&2
+    return 2
+  }
+  fleet_spec_require_jq || return
+
+  if [[ $# -gt 1 ]]; then
+    for source in "$@"; do
+      if [[ "$source" == "-" ]]; then
+        printf '[ERROR] --spec - cannot be combined with other spec inputs\n' >&2
+        return 2
+      fi
+    done
+  fi
+
+  for source in "$@"; do
+    if [[ "$source" == "-" ]]; then
+      spec_json="$(cat)"
+    elif [[ -f "$source" && -r "$source" ]]; then
+      spec_json="$(cat -- "$source")"
+    else
+      printf '[ERROR] FleetSpec is not readable: %s\n' "$source" >&2
+      return 2
+    fi
+
+    if ! normalized="$(jq -ces -L "$FLEET_SPEC_IO_DIR" '
+      include "fleet_spec_validate";
+      if length != 1 then error("expected one JSON value") else .[0] end
+      | if type == "object" then [. | fleet_spec_v1]
+        elif type == "array" and length > 0 then map(fleet_spec_v1)
+        else error("expected a FleetSpec object or non-empty array") end
+    ' <<<"$spec_json" 2>/dev/null)"; then
+      printf '[ERROR] invalid FleetSpec v1: %s\n' "$source" >&2
+      printf '[ERROR] expected one object or non-empty array of objects with schema_version=1, taskset, optional agent/workers, and no other fields\n' >&2
+      return 2
+    fi
+    normalized_inputs[${#normalized_inputs[@]}]="$normalized"
+  done
+
+  FLEET_SPECS_JSON="$(printf '%s\n' "${normalized_inputs[@]}" | jq -cs 'add')"
+  FLEET_SPEC_COUNT="$(jq -r 'length' <<<"$FLEET_SPECS_JSON")"
+}
+
 fleet_spec_from_taskset_args() {
   local taskset="$1" agent="$2" workers="$3"
   fleet_spec_require_jq || return

@@ -339,6 +339,22 @@ exit "${STUB_EXIT:-0}"
         self.assertIn("runner=pinchbench", result.stdout)
         self.assertIn("args=--instances 2", result.stdout)
 
+    def test_spec_stdin_array_routes_multiple_runs_automatically(self):
+        result = self.run_fleet(
+            "--spec", "-", "--dry-run",
+            input_text=json.dumps(
+                [
+                    {"schema_version": 1, "taskset": "owner/first"},
+                    {"schema_version": 1, "taskset": "owner/second"},
+                ]
+            ),
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("DATASET_NAME=owner/first", result.stdout)
+        self.assertIn("DATASET_NAME=owner/second", result.stdout)
+        self.assertEqual(result.stdout.count("Command: env"), 2)
+
     def test_spec_rejects_invalid_documents(self):
         invalid_specs = (
             "not-json",
@@ -443,6 +459,7 @@ exit "${STUB_EXIT:-0}"
         self.assertIn("--detach", result.stdout)
         self.assertIn("--spec", result.stdout)
         self.assertIn("--prompt", result.stdout)
+        self.assertNotIn("--batch", result.stdout)
         self.assertIn("--dry-run", result.stdout)
         self.assertNotRegex(result.stdout, r"--tasks(?:\s|$)")
         # Help must be self-sufficient: a user who forgot the value names
@@ -458,6 +475,135 @@ exit "${STUB_EXIT:-0}"
 
         self.assertEqual(result.returncode, 2)
         self.assertIn("--prompt must be the first argument", result.stderr)
+
+    def test_spec_array_routes_multiple_runs_automatically(self):
+        spec = self.root / "fleet-specs.json"
+        spec.write_text(
+            json.dumps(
+                [
+                    {"schema_version": 1, "taskset": "owner/first"},
+                    {"schema_version": 1, "taskset": "owner/second"},
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        result = self.run_fleet("--spec", str(spec), "--dry-run")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("DATASET_NAME=owner/first", result.stdout)
+        self.assertIn("DATASET_NAME=owner/second", result.stdout)
+        self.assertEqual(result.stdout.count("Command: env"), 2)
+        self.assertIn("RUN_ID=fleet-", result.stderr)
+        self.assertNotIn("runner=harbor", result.stdout)
+
+    def test_multiple_spec_files_are_flattened_and_saved_as_an_array(self):
+        first = self.root / "first.json"
+        second = self.root / "second.json"
+        output = self.root / "normalized.json"
+        first.write_text(
+            json.dumps({"schema_version": 1, "taskset": "owner/first"}),
+            encoding="utf-8",
+        )
+        second.write_text(
+            json.dumps(
+                [
+                    {"schema_version": 1, "taskset": "owner/second"},
+                    {"schema_version": 1, "taskset": "owner/third", "workers": 3.0},
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        result = self.run_fleet(
+            "--spec", str(first), str(second),
+            "--output", str(output), "--dry-run",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            json.loads(output.read_text(encoding="utf-8")),
+            [
+                {"schema_version": 1, "taskset": "owner/first"},
+                {"schema_version": 1, "taskset": "owner/second"},
+                {"schema_version": 1, "taskset": "owner/third", "workers": 3},
+            ],
+        )
+        self.assertEqual(result.stdout.count("Command: env"), 3)
+
+    def test_single_element_array_keeps_single_run_semantics(self):
+        spec = self.root / "one.json"
+        output = self.root / "normalized.json"
+        spec.write_text(
+            json.dumps(
+                [{"schema_version": 1, "taskset": "terminalbench21", "workers": 2}]
+            ),
+            encoding="utf-8",
+        )
+
+        result = self.run_fleet(
+            "--spec", str(spec), "--output", str(output), "--dry-run"
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            json.loads(output.read_text(encoding="utf-8")),
+            {"schema_version": 1, "taskset": "terminalbench21", "workers": 2},
+        )
+        self.assertNotIn("RUN_ID=fleet-", result.stderr)
+        self.assertFalse((self.root / "fleet-batch-logs").exists())
+
+    def test_invalid_file_prevents_all_multi_run_launches(self):
+        valid = self.root / "valid.json"
+        invalid = self.root / "invalid.json"
+        valid.write_text(
+            json.dumps({"schema_version": 1, "taskset": "owner/valid"}),
+            encoding="utf-8",
+        )
+        invalid.write_text(
+            json.dumps({"schema_version": 1, "taskset": ""}), encoding="utf-8"
+        )
+
+        result = self.run_fleet("--spec", str(valid), str(invalid))
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("invalid FleetSpec v1", result.stderr)
+        self.assertNotIn("runner=", result.stdout)
+        self.assertFalse((self.root / "fleet-batch-logs").exists())
+
+    def test_spec_stdin_cannot_be_combined_with_file_inputs(self):
+        spec = self.root / "fleet-spec.json"
+        spec.write_text(
+            json.dumps({"schema_version": 1, "taskset": "terminalbench21"}),
+            encoding="utf-8",
+        )
+
+        result = self.run_fleet(
+            "--spec", "-", str(spec),
+            input_text=json.dumps({"schema_version": 1, "taskset": "pinchbench"}),
+        )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("cannot be combined", result.stderr)
+
+    def test_spec_keeps_existing_option_order_compatibility(self):
+        spec = self.root / "fleet-spec.json"
+        spec.write_text(
+            json.dumps({"schema_version": 1, "taskset": "terminalbench21"}),
+            encoding="utf-8",
+        )
+
+        result = self.run_fleet("--dry-run", "--spec", str(spec))
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("DATASET_NAME=terminalbench21", result.stdout)
+
+    def test_removed_batch_flag_is_not_accepted(self):
+        result = self.run_fleet("--batch", "runs.json", "--dry-run")
+
+        self.assertEqual(result.returncode, 2)
+        self.assertNotIn("runner=", result.stdout)
+        self.assertNotIn("--batch", result.stderr)
 
     def test_short_flags_match_long_forms(self):
         result = self.run_fleet(

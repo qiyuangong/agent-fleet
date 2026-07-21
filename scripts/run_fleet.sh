@@ -5,18 +5,23 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="${REPO_DIR:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 # shellcheck source=fleet_spec_io.sh
 source "$SCRIPT_DIR/fleet_spec_io.sh"
-[[ "${1:-}" != "--prompt" && "${1:-}" != "-p" ]] || exec bash "$SCRIPT_DIR/fleet_prompt.sh" "$@"
+case "${1:-}" in
+  -s|--spec) exec bash "$SCRIPT_DIR/fleet_spec.sh" "$@" ;;
+  -p|--prompt) exec bash "$SCRIPT_DIR/fleet_prompt.sh" "$@" ;;
+esac
 for arg in "$@"; do
   if [[ "$arg" == "--prompt" || "$arg" == "-p" ]]; then
     printf '[ERROR] %s must be the first argument\n' "$arg" >&2
     exit 2
+  elif [[ "$arg" == "--spec" || "$arg" == "-s" ]]; then
+    exec bash "$SCRIPT_DIR/fleet_spec.sh" "$@"
   fi
 done
 usage() {
   cat <<EOF
 Usage:
   $0 --taskset <taskset> [--agent <agent>] [--workers <n>] [--output <file>] [--detach] [--dry-run]
-  $0 --spec <file|-> [--output <file>] [--detach] [--dry-run]
+  $0 --spec <file|-> [file ...] [--output <file>] [--detach] [--dry-run]
   $0 --prompt <text> [--output <file>] [--detach] [--dry-run]
 
 Short flags: -t --taskset, -a --agent, -n --workers, -s --spec, -p --prompt,
@@ -48,7 +53,7 @@ apply_fleet_spec() {
   WORKERS="$(jq -r 'if has("workers") then (.workers | tostring) else "" end' <<<"$FLEET_SPEC_JSON")"
 }
 
-TASKSET="" AGENT_ARG="" WORKERS="" SPEC_SOURCE="" OUTPUT="" FLEET_SPEC_JSON=""
+TASKSET="" AGENT_ARG="" WORKERS="" OUTPUT="" FLEET_SPEC_JSON=""
 DETACH=0 DRY_RUN=0
 
 while [[ $# -gt 0 ]]; do
@@ -56,10 +61,6 @@ while [[ $# -gt 0 ]]; do
     -t|--taskset) TASKSET="$2"; shift 2 ;;
     -a|--agent) AGENT_ARG="$2"; shift 2 ;;
     -n|--workers) WORKERS="$2"; shift 2 ;;
-    -s|--spec)
-      [[ $# -ge 2 ]] || { printf '[ERROR] --spec requires a file path or -\n' >&2; exit 2; }
-      SPEC_SOURCE="$2"; shift 2
-      ;;
     -o|--output)
       [[ $# -ge 2 && -n "$2" ]] || { printf '[ERROR] --output requires a non-empty file path\n' >&2; exit 2; }
       if fleet_spec_is_option_shaped "$2"; then
@@ -76,15 +77,6 @@ while [[ $# -gt 0 ]]; do
 done
 
 fleet_spec_validate_output_path "$OUTPUT" || exit $?
-
-if [[ -n "$SPEC_SOURCE" ]]; then
-  if [[ -n "$TASKSET" || -n "$AGENT_ARG" || -n "$WORKERS" ]]; then
-    printf '[ERROR] --spec cannot be combined with --taskset, --agent, or --workers\n' >&2
-    exit 2
-  fi
-  fleet_spec_load "$SPEC_SOURCE"
-  apply_fleet_spec
-fi
 
 [[ -n "$TASKSET" ]] || { usage >&2; exit 2; }
 if [[ -n "$OUTPUT" ]]; then

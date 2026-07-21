@@ -5,6 +5,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export RUN_ID="${RUN_ID:-$(date +%Y-%m-%d-%H%M)-harbor-tui}"
 . "$SCRIPT_DIR/env.sh"
 
+if [[ "$ROLLOUT" == "1" && "${FLEET_BATCH_HARBOR_RUNS:-1}" != "1" ]]; then
+  printf '[ERROR] ROLLOUT=1 supports only one Harbor run per Batch; rollout listeners share RL_PORT=%s\n' \
+    "$RL_PORT" >&2
+  exit 2
+fi
+
 DETACH_MODE=false
 if [[ "${1:-}" == "--detach" ]]; then
   DETACH_MODE=true

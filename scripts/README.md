@@ -4,6 +4,8 @@
 | --- | --- |
 | `setup.sh` | One-shot environment bootstrap: installs Node + Claude Code, writes config, installs skills |
 | `run_fleet.sh` | Routes tasksets to the existing Harbor or OpenClaw runner |
+| `fleet_spec.sh` | Internal dispatcher for validated single- and multi-run spec inputs |
+| `fleet_batch.sh` | Internal concurrent launcher for normalized multi-run inputs |
 | `dind-run.sh` | Start/reuse a Docker-in-Docker runner, bootstrap it, then invoke `run_fleet.sh` |
 
 For the end-to-end quick start, see the [root README](../README.md#quick-start).
@@ -66,7 +68,7 @@ Safe to re-run.
 
 ```bash
 ./scripts/run_fleet.sh --taskset <taskset> [--agent <agent>] [--workers <n>] [--output <file>] [--detach] [--dry-run]
-./scripts/run_fleet.sh --spec <file|-> [--output <file>] [--detach] [--dry-run]
+./scripts/run_fleet.sh --spec <file|-> [file ...] [--output <file>] [--detach] [--dry-run]
 ./scripts/run_fleet.sh --prompt <text> [--output <file>] [--detach] [--dry-run]
 ```
 
@@ -75,10 +77,10 @@ Safe to re-run.
 | `-t, --taskset <value>` | Harbor taskset, explicit local path, `pinchbench`, or `clawbio` |
 | `-a, --agent <name>` | Optional Harbor agent override; `openclaw` is accepted for consistent OpenClaw commands |
 | `-n, --workers <n>` | Harbor workers or OpenClaw fleet instances |
-| `-s, --spec <file|->` | Read a FleetSpec v1 JSON object from a file or standard input |
+| `-s, --spec <file|-> [files...]` | Read one or more FleetSpec v1 objects or arrays; multiple runs are detected automatically |
 | `-d, --detach` | Start Harbor in its detached Zellij mode; ignored with a warning for OpenClaw tasksets |
 | `-p, --prompt <text>` | Translate, validate, and run one natural-language benchmark request |
-| `-o, --output <file>` | Atomically save the validated FleetSpec before running it |
+| `-o, --output <file>` | Atomically save the validated FleetSpec object or flattened array before running |
 | `--dry-run` | Print the downstream command and environment without running it |
 
 Every short flag behaves exactly like its long form, for example:
@@ -86,6 +88,7 @@ Every short flag behaves exactly like its long form, for example:
 ```bash
 ./scripts/run_fleet.sh -t terminalbench21 -a claude-code -n 10 -d
 ./scripts/run_fleet.sh -p "Run terminalbench21 with claude-code and 2 workers"
+./scripts/run_fleet.sh -s claude.json opencode.json
 ```
 
 Examples:
@@ -160,7 +163,7 @@ jq -n \
   > fleet-spec.json
 ```
 
-To run without creating a file, pass one JSON object on standard input:
+To run without creating a file, pass one JSON object or array on standard input:
 
 ```bash
 ./scripts/run_fleet.sh --spec - --dry-run <<'JSON'
@@ -172,9 +175,56 @@ To run without creating a file, pass one JSON object on standard input:
 JSON
 ```
 
-Spec input cannot be combined with `--taskset`, `--agent`, or `--workers`.
-It can be combined with `--output` to write a normalized copy. Multiple JSON
-values, unknown fields, control characters, and invalid values are rejected.
+Spec input cannot be combined with `--taskset`, `--agent`, or `--workers`. It
+can be combined with `--output` to write a normalized copy. Multiple JSON
+values in one input, unknown fields, control characters, and invalid values are
+rejected. Standard input (`-`) cannot be combined with file inputs.
+
+### Automatic multi-run execution
+
+`--spec` accepts any number of readable files. Each file may contain one
+FleetSpec object or a non-empty array; files and arrays are flattened in command
+line order. One resulting spec uses the normal single-run path. More than one
+is launched concurrently without requiring a separate mode or flag:
+
+```bash
+./scripts/run_fleet.sh --spec claude.json opencode.json
+./scripts/run_fleet.sh --spec runs.json
+./scripts/run_fleet.sh -s runs.json --dry-run
+```
+
+Every spec is validated before any runner starts. Each run receives a unique
+`RUN_ID`; Harbor runs also use it as their Zellij session name and are launched
+with `--detach`. Harbor run-state path overrides are cleared for each child so
+its output, task, queue, runtime, layout, jobs, monitor, and rollout paths are
+re-derived from that unique `RUN_ID` instead of being shared across the batch.
+
+One multi-run invocation may contain at most one OpenClaw run (`pinchbench` or
+`clawbio`), because those runners operate the same singleton fleet. A second
+OpenClaw spec rejects the whole invocation before any runner starts. The
+allowed OpenClaw runner stays in the foreground while Harbor runs detach, and
+the dispatcher waits for every child launch process. On `HUP`, `INT`, or
+`TERM`, it forwards that signal to live foreground children and reaps them
+before exiting.
+
+Rollout mode likewise supports only one Harbor run per multi-run invocation
+because rollout listeners share `RL_PORT`. If effective Harbor configuration
+enables `ROLLOUT=1`, a multi-Harbor invocation rejects each launch before
+starting a listener.
+
+Launch inputs and logs are stored under
+`$PWD/fleet-batch-logs/<timestamp>-<pid>/` as `N.spec.json` and `N.log`.
+`FLEET_BATCH_LOG_DIR` overrides the parent directory. The summary and artifact
+path are printed to standard error; any failed child makes the invocation exit with code
+`1`. With multiple specs, `--output` writes their normalized flattened array;
+with one spec it remains a single object. `--dry-run` writes the normalized spec
+copies and prints each resolved runner command without creating log files or
+starting a runner.
+
+Multi-run execution deliberately does not schedule, throttle, or preflight
+runs. Harbor runs have separate filesystem state, but concurrent runs still
+share host resources, Docker, gateways, and service QPS. Individual runners
+own any resulting resource conflicts and failures.
 
 ### Prompt execution
 

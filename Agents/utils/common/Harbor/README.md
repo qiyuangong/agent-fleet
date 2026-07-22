@@ -114,13 +114,13 @@ ROLLOUT=1 bash start.sh --detach
 
 The service provides `GET /health`, `GET /datasets`,
 `GET /datasets/{dataset_name}/tasks`, and `POST /run_trial`.  Requests are
-queued, then per-job zellij workers run the same `harboropik.sh` path as normal
-benchmark workers, so task panes keep the regular agent/tool logs.
+queued, then per-submission zellij workers run the same `harboropik.sh` path as
+normal benchmark workers, so task panes keep the regular agent/tool logs.
 
-Each `/run_trial` request must include a ray job id, for example `ray_job_id`,
-`ray_submission_id`, or `metadata.ray_job_id`.  The service uses this id to
-create/reuse one `harbor-rollout-<agent>-<dataset>-<ray_job_id>` zellij session;
-requests without a job id are rejected instead of being queued without workers.
+Each `/run_trial` request must include a top-level `ray_submission_id`. The
+service uses it to create/reuse one
+`harbor-rollout-<agent>-<dataset>-<ray_submission_id>` zellij session; requests
+without it are rejected instead of being queued without workers.
 
 For Docker usage, publish the listener port and run the same command inside the
 container:
@@ -138,14 +138,13 @@ docker exec harbor-rollout bash -lc '
 '
 ```
 
-For foreground debugging, source the same environment and run the listener
-directly.  The listener still creates per-job zellij worker sessions for
-requests with a ray job id.
+For foreground debugging, run the same launcher without `--detach`. The
+listener still creates per-submission zellij worker sessions for requests with
+a top-level `ray_submission_id`.
 
 ```bash
 cd Agents/utils/common/Harbor
-ROLLOUT=1 . ./env.sh
-python3 "$RL_UTILS_DIR/rollout_remote_harbor.py"
+ROLLOUT=1 bash start.sh
 ```
 
 ## Harbor Monitor

@@ -170,7 +170,7 @@ while true; do
   echo "AGENT:       $RL_AGENT"
   echo "MODEL:       $RL_MODEL_NAME"
   echo "DATASET:     $RL_DATASET_NAME -> $RL_DATASET_ROOT"
-  echo "RAY_JOB:     ${RL_ZELLIJ_JOB_ID:-all}"
+  echo "RAY_SUBMISSION: ${RL_ZELLIJ_SUBMISSION_ID:-all}"
   echo "POLAR_PORT:  $RL_PORT"
   echo "WORKERS:     $RL_WORKERS"
   echo "OPIK_URL:    $OPIK_URL_OVERRIDE"

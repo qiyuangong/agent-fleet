@@ -43,10 +43,35 @@ stop_server() {
   rm -f "$RL_SERVER_PID_FILE"
 }
 
+require_trace_plugin_source() {
+  local path="$1"
+  if [[ ! -f "$path" ]]; then
+    echo "trace plugin source missing: $path" >&2
+    echo "initialize the repository submodules before starting the rollout listener" >&2
+    return 1
+  fi
+}
+
+validate_trace_plugin_source() {
+  local trace_enabled="${TRACE_TO_OPIK:-${TB_TRACE_TO_OPIK:-}}"
+
+  if [[ "$RL_AGENT" == "opencode" ]]; then
+    # The custom OpenCode runner always uploads both files during install,
+    # including when trace emission is disabled for the task.
+    require_trace_plugin_source "$TRACE_PLUGIN_OPENCODE_PLUGIN_SOURCE" || return 1
+    require_trace_plugin_source "$TRACE_PLUGIN_OPENCODE_HOOK_SOURCE" || return 1
+  elif [[ "$trace_enabled" == "true" || "$trace_enabled" == "1" || "$TB_CC_OPIK_ENABLE_HOOK" == "1" ]]; then
+    require_trace_plugin_source "$TRACE_PLUGIN_CLAUDE_HOOK_SOURCE"
+  fi
+}
+
 if [[ "$STOP_MODE" == "true" ]]; then
   stop_server
   exit 0
 fi
+
+# Do not expose a healthy rollout endpoint that can only return empty traces.
+validate_trace_plugin_source
 
 mkdir -p "$RL_TRIALS_DIR" "$RL_ACTIVE_DIR" "$RL_QUEUE_DIR/pending" "$RL_QUEUE_DIR/results" \
   "$RL_JOB_QUEUE_ROOT" "$RL_JOB_RUNTIME_ROOT" "$(dirname "$RL_TRACE_LOG")" "$RUNTIME_DIR"
@@ -71,7 +96,7 @@ fi
 
 if [[ "$DETACH_MODE" == "true" ]]; then
   # The listener is intentionally not inside zellij. It owns port 19001; job
-  # zellij sessions are created lazily by rollout_remote_harbor.py per ray job.
+  # zellij sessions are created lazily per Ray submission.
   nohup setsid env -u ZELLIJ_SESSION_NAME TERM=xterm-256color bash -lc \
     "cd '$RL_SCRIPT_DIR' && exec python3 rollout_remote_harbor.py" \
     >>"$RL_SERVER_LOG" 2>&1 &

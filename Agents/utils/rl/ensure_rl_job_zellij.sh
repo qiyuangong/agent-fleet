@@ -5,9 +5,9 @@ RL_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HARBOR_SCRIPT_DIR="${HARBOR_SCRIPT_DIR:-$(cd "$RL_SCRIPT_DIR/../common/Harbor" && pwd)}"
 . "$HARBOR_SCRIPT_DIR/env.sh"
 
-ray_job_id="${1:?ray job id required}"
+ray_submission_id="${1:?ray submission id required}"
 dataset_name="${2:-${RL_DATASET_NAME:-seta}}"
-job_queue_dir="${3:-${RL_JOB_QUEUE_ROOT}/$(printf '%s' "$ray_job_id" | tr -c 'A-Za-z0-9._-' '-')}"
+job_queue_dir="${3:-${RL_JOB_QUEUE_ROOT}/$(printf '%s' "$ray_submission_id" | tr -c 'A-Za-z0-9._-' '-')}"
 
 safe_name() {
   printf '%s' "$1" | tr '/[:space:]' '---' | tr -cd 'A-Za-z0-9._-'
@@ -23,13 +23,13 @@ ensure_zellij_web_sharing_config() {
   fi
 }
 
-job_slug="$(safe_name "$ray_job_id")"
+submission_slug="$(safe_name "$ray_submission_id")"
 agent_slug="$(safe_name "${RL_AGENT:-claude-code}")"
 dataset_slug="$(safe_name "$dataset_name")"
-session_name="harbor-rollout-${agent_slug}-${dataset_slug}-${job_slug}"
-job_runtime_dir="${RL_JOB_RUNTIME_ROOT}/${job_slug}"
-layout_file="${job_runtime_dir}/harbor-rollout-${job_slug}.kdl"
-lock_file="${RL_JOB_RUNTIME_ROOT}/${job_slug}.lock"
+session_name="harbor-rollout-${agent_slug}-${dataset_slug}-${submission_slug}"
+job_runtime_dir="${RL_JOB_RUNTIME_ROOT}/${submission_slug}"
+layout_file="${job_runtime_dir}/harbor-rollout-${submission_slug}.kdl"
+lock_file="${RL_JOB_RUNTIME_ROOT}/${submission_slug}.lock"
 
 mkdir -p "$job_queue_dir/pending" "$job_queue_dir/active" "$job_queue_dir/results" "$job_runtime_dir" "$RL_JOB_RUNTIME_ROOT"
 
@@ -47,7 +47,7 @@ session_ready() {
       printf '%s\n' "$session_name"
       exit 0
     fi
-    echo "timed out waiting for job zellij lock: $lock_file" >&2
+    echo "timed out waiting for submission zellij lock: $lock_file" >&2
     exit 1
   fi
 
@@ -60,12 +60,12 @@ session_ready() {
 
   env \
     RL_ZELLIJ_ROLE=job \
-    RL_ZELLIJ_JOB_ID="$ray_job_id" \
+    RL_ZELLIJ_SUBMISSION_ID="$ray_submission_id" \
     RL_QUEUE_DIR="$job_queue_dir" \
     RL_ACTIVE_DIR="$job_queue_dir/active" \
     RUNTIME_DIR="$job_runtime_dir" \
     LAYOUT_FILE="$layout_file" \
-    JOBS_ROOT="${OUTPUT_PATH}/jobs/${agent_slug}/${job_slug}" \
+    JOBS_ROOT="${OUTPUT_PATH}/jobs/${agent_slug}/${submission_slug}" \
     "$RL_SCRIPT_DIR/gen_rl_rollout_zellij_layout.sh" "$layout_file" >/dev/null
 
   # If a previous cleanup removed the runtime layout but zellij still lists the
@@ -77,12 +77,12 @@ session_ready() {
   # terminal repaint into an unbounded zellij typescript file.
   nohup setsid env -u ZELLIJ_SESSION_NAME TERM=xterm-256color \
     RL_ZELLIJ_ROLE=job \
-    RL_ZELLIJ_JOB_ID="$ray_job_id" \
+    RL_ZELLIJ_SUBMISSION_ID="$ray_submission_id" \
     RL_QUEUE_DIR="$job_queue_dir" \
     RL_ACTIVE_DIR="$job_queue_dir/active" \
     RUNTIME_DIR="$job_runtime_dir" \
     LAYOUT_FILE="$layout_file" \
-    JOBS_ROOT="${OUTPUT_PATH}/jobs/${agent_slug}/${job_slug}" \
+    JOBS_ROOT="${OUTPUT_PATH}/jobs/${agent_slug}/${submission_slug}" \
     script -q -c "$zellij_cmd" /dev/null >/dev/null 2>&1 &
 
   # zellij can take tens of seconds to become visible under Docker-in-Docker

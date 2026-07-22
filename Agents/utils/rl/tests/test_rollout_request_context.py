@@ -20,6 +20,26 @@ SPEC.loader.exec_module(MODULE)
 
 
 class RolloutRequestContextTest(unittest.TestCase):
+    def test_only_top_level_ray_submission_id_is_used(self) -> None:
+        self.assertEqual(
+            MODULE._extract_ray_submission_id({
+                "ray_submission_id": "canonical-submission",
+                "ray_job_id": "wrong-job-id",
+                "job_id": "wrong-job-id",
+                "metadata": {"ray_submission_id": "wrong-metadata-id"},
+                "trial_config": {"ray_submission_id": "wrong-trial-id"},
+            }),
+            "canonical-submission",
+        )
+
+    def test_missing_top_level_ray_submission_id_is_rejected(self) -> None:
+        with self.assertRaisesRegex(ValueError, "top-level ray_submission_id is required"):
+            MODULE._extract_ray_submission_id({
+                "ray_job_id": "fallback-must-not-be-used",
+                "metadata": {"ray_submission_id": "fallback-must-not-be-used"},
+                "trial_config": {"ray_submission_id": "fallback-must-not-be-used"},
+            })
+
     def test_request_context_reaches_queue_zellij_and_trace(self) -> None:
         with tempfile.TemporaryDirectory() as root:
             root_path = Path(root)
@@ -37,7 +57,7 @@ class RolloutRequestContextTest(unittest.TestCase):
                 mock.patch.object(MODULE, "DEFAULT_DISABLED_TASK_IDS", ""),
                 mock.patch.object(MODULE, "JOB_QUEUE_ROOT", job_queue_root),
                 mock.patch.object(MODULE, "TRACE_LOG", trace_log),
-                mock.patch.object(MODULE, "_ensure_job_zellij", ensure_zellij),
+                mock.patch.object(MODULE, "_ensure_submission_zellij", ensure_zellij),
                 mock.patch.dict(os.environ, {"RL_DATASET_ROOTS": ""}),
             ):
                 request_id, result_path = MODULE._enqueue_request({
@@ -45,11 +65,11 @@ class RolloutRequestContextTest(unittest.TestCase):
                     "task_id": "task-1",
                     "dataset_name": "seta",
                     "model_name": "model-from-request",
-                    "ray_job_id": "ray-job-test",
+                    "ray_submission_id": "ray-submission-test",
                     "polar_task_id": "polar-task-test",
                 })
 
-            queue_dir = job_queue_root / "ray-job-test"
+            queue_dir = job_queue_root / "ray-submission-test"
             payload = json.loads(
                 (queue_dir / "pending" / "request-1.json").read_text(encoding="utf-8")
             )
@@ -58,24 +78,26 @@ class RolloutRequestContextTest(unittest.TestCase):
             self.assertEqual(request_id, "request-1")
             self.assertEqual(result_path, queue_dir / "results" / "request-1.json")
             self.assertEqual(payload["model_name"], "model-from-request")
-            self.assertEqual(payload["ray_job_id"], "ray-job-test")
-            self.assertEqual(payload["opik_project_name"], "ray-job-test")
+            self.assertEqual(payload["ray_submission_id"], "ray-submission-test")
+            self.assertNotIn("ray_job_id", payload)
+            self.assertEqual(payload["opik_project_name"], "ray-submission-test")
             self.assertEqual(trace["model_name"], "model-from-request")
-            self.assertEqual(trace["ray_job_id"], "ray-job-test")
-            self.assertEqual(trace["opik_project_name"], "ray-job-test")
+            self.assertEqual(trace["ray_submission_id"], "ray-submission-test")
+            self.assertNotIn("ray_job_id", trace)
+            self.assertEqual(trace["opik_project_name"], "ray-submission-test")
             ensure_zellij.assert_called_once_with(
-                "ray-job-test",
+                "ray-submission-test",
                 "seta",
                 queue_dir,
                 "model-from-request",
-                "ray-job-test",
+                "ray-submission-test",
             )
 
-    def test_only_top_level_opik_project_name_overrides_ray_job(self) -> None:
+    def test_only_top_level_opik_project_name_overrides_submission(self) -> None:
         self.assertEqual(
             MODULE._extract_opik_project_name(
                 {"opik_project_name": "project-from-request"},
-                "ray-job-test",
+                "ray-submission-test",
             ),
             "project-from-request",
         )
@@ -85,9 +107,9 @@ class RolloutRequestContextTest(unittest.TestCase):
                     "metadata": {"opik_project_name": "project-from-metadata"},
                     "trial_config": {"opik_project_name": "project-from-trial"},
                 },
-                "ray-job-test",
+                "ray-submission-test",
             ),
-            "ray-job-test",
+            "ray-submission-test",
         )
 
 

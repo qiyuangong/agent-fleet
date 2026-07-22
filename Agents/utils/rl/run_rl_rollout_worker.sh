@@ -116,7 +116,7 @@ payload = {
     "ok": status == "completed" and not exception_type,
     "task_id": request.get("task_id"),
     "task_path": request.get("task_path"),
-    "ray_job_id": request.get("ray_job_id"),
+    "ray_submission_id": request.get("ray_submission_id"),
     "polar_task_id": request.get("polar_task_id"),
     "display_name": request.get("display_name"),
     "trial_name": Path(result_file).parent.name if result_file else "",
@@ -130,7 +130,7 @@ payload = {
     "metadata": {
         "request_id": request.get("request_id"),
         "session_id": request.get("session_id"),
-        "ray_job_id": request.get("ray_job_id"),
+        "ray_submission_id": request.get("ray_submission_id"),
         "polar_task_id": request.get("polar_task_id"),
         "display_name": request.get("display_name"),
         "console_log": console_log,
@@ -258,7 +258,7 @@ while true; do
   api_key="$(json_get_first "$request_file" api_key trial_config.agent.kwargs.api_key trial_config.agent.kwargs.llm_kwargs.api_key)"
   api_key="${api_key:-${RL_API_KEY:-}}"
   session_id="$(json_get "$request_file" session_id)"
-  ray_job_id="$(json_get "$request_file" ray_job_id)"
+  ray_submission_id="$(json_get "$request_file" ray_submission_id)"
   opik_project_name="$(json_get "$request_file" opik_project_name)"
   polar_task_id="$(json_get "$request_file" polar_task_id)"
   display_name="$(json_get "$request_file" display_name)"
@@ -287,9 +287,9 @@ while true; do
   result_out="$RESULTS_DIR/${request_id}.json"
 
   mkdir -p "$task_jobs_root"
-  printf '%s\t%s\t%s\t%s\t%s\n' "$request_id" "$task_name" "$display_name" "$ray_job_id" "$polar_task_id" > "$CURRENT_FILE"
+  printf '%s\t%s\t%s\t%s\t%s\n' "$request_id" "$task_name" "$display_name" "$ray_submission_id" "$polar_task_id" > "$CURRENT_FILE"
   clear_pane_history
-  log_msg "starting request=${request_id} display=${display_name} task=${task_name} ray_job=${ray_job_id:-none} polar_task=${polar_task_id:-none}"
+  log_msg "starting request=${request_id} display=${display_name} task=${task_name} ray_submission=${ray_submission_id:-none} polar_task=${polar_task_id:-none}"
 
   if [[ -n "$dataset_root" ]]; then
     worklist="$WORKLIST_DIR/$(safe_name "$dataset_root").txt"
@@ -312,7 +312,7 @@ while true; do
     export MODEL="$model_name"
     export TB_MODEL="$model_name"
     export RL_MODEL_NAME="$model_name"
-    export TB_RUN_ID="$ray_job_id"
+    export TB_RUN_ID="$ray_submission_id"
     export OPIK_PROJECT_NAME="$opik_project_name"
     if [[ "$RL_AGENT" == "claude-code" ]]; then
       # env.sh derives these aliases when the listener starts. Override every
@@ -429,7 +429,7 @@ PY
     reward="$(echo "$summary" | sed -n '1p')"
     exception_type="$(echo "$summary" | sed -n '2p')"
     if [[ "${exception_type:-}" == "AgentTimeoutError" ]]; then
-      finalize_timeout_trace "$result_file" "$opik_project_name" "$ray_job_id" "$task_name"
+      finalize_timeout_trace "$result_file" "$opik_project_name" "$ray_submission_id" "$task_name"
     fi
     if [[ -z "${exception_type:-}" && "$rc" -eq 0 ]]; then
       status="completed"
@@ -437,8 +437,8 @@ PY
   fi
 
   json_build_result "$request_file" "${result_file:-}" "$task_console_log" "$reward" "$exception_type" "$rc" "$result_out" "$status"
-  printf '{"event":"finish","timestamp":"%s","request_id":"%s","task_id":"%s","display_name":"%s","ray_job_id":"%s","polar_task_id":"%s","status":"%s","reward":"%s","exception_type":"%s"}\n' \
-    "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$request_id" "$task_name" "$display_name" "$ray_job_id" "$polar_task_id" "$status" "$reward" "$exception_type" >> "$RL_TRACE_LOG"
+  printf '{"event":"finish","timestamp":"%s","request_id":"%s","task_id":"%s","display_name":"%s","ray_submission_id":"%s","polar_task_id":"%s","status":"%s","reward":"%s","exception_type":"%s"}\n' \
+    "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$request_id" "$task_name" "$display_name" "$ray_submission_id" "$polar_task_id" "$status" "$reward" "$exception_type" >> "$RL_TRACE_LOG"
   log_msg "finished request=${request_id} display=${display_name} task=${task_name} status=${status} reward=${reward:-none} exception=${exception_type:-none} rc=${rc}"
   rm -f "$CURRENT_FILE" "$request_file"
   if ! python3 "$RL_SCRIPT_DIR/rollout_worker_utils.py" prune-trials \

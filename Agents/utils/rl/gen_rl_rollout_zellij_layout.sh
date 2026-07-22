@@ -10,7 +10,7 @@ mkdir -p "$(dirname "$OUT")"
 
 if [[ "${RL_ZELLIJ_ROLE:-}" != "job" ]]; then
   echo "RL rollout listener is not a zellij layout; use run_rl_rollout_server.sh for port ${RL_PORT}." >&2
-  echo "Set RL_ZELLIJ_ROLE=job only when generating per-ray-job worker layouts." >&2
+  echo "Set RL_ZELLIJ_ROLE=job only when generating per-submission worker layouts." >&2
   exit 2
 fi
 
@@ -24,7 +24,7 @@ emit_worker_pane() {
 EOF
 }
 
-job_label="${RL_ZELLIJ_JOB_ID:-job}"
+job_label="${RL_ZELLIJ_SUBMISSION_ID:-submission}"
 if [[ "${#job_label}" -gt 18 ]]; then
   job_label="${job_label: -18}"
 fi

@@ -89,29 +89,17 @@ def _short_suffix(value: str, width: int = 6) -> str:
     return value[-width:] if value else ""
 
 
-def _extract_ray_job_id(request: dict[str, Any]) -> str:
-    meta = _metadata(request)
-    trial = _trial_config(request)
-    return _first_nonempty(
-        request.get("ray_job_id"),
-        request.get("ray_submission_id"),
-        request.get("ray_job"),
-        request.get("job_id"),
-        meta.get("ray_job_id"),
-        meta.get("ray_submission_id"),
-        meta.get("ray_job"),
-        meta.get("job_id"),
-        trial.get("ray_job_id"),
-        trial.get("ray_submission_id"),
-        trial.get("ray_job"),
-        trial.get("job_id"),
-    )
+def _extract_ray_submission_id(request: dict[str, Any]) -> str:
+    ray_submission_id = _first_nonempty(request.get("ray_submission_id"))
+    if not ray_submission_id:
+        raise ValueError("top-level ray_submission_id is required in rollout mode")
+    return ray_submission_id
 
 
-def _extract_opik_project_name(request: dict[str, Any], ray_job_id: str) -> str:
+def _extract_opik_project_name(request: dict[str, Any], ray_submission_id: str) -> str:
     return _first_nonempty(
         request.get("opik_project_name"),
-        ray_job_id,
+        ray_submission_id,
         DEFAULT_OPIK_PROJECT_NAME,
     )
 
@@ -139,17 +127,17 @@ def _display_name(task_name: str, polar_task_id: str, session_id: str) -> str:
     return f"{task_name}-{suffix}" if suffix else task_name
 
 
-def _queue_for_job(ray_job_id: str) -> Path:
-    if not ray_job_id:
+def _queue_for_submission(ray_submission_id: str) -> Path:
+    if not ray_submission_id:
         return QUEUE_DIR
-    return JOB_QUEUE_ROOT / _safe_slug(ray_job_id)
+    return JOB_QUEUE_ROOT / _safe_slug(ray_submission_id)
 
 
-def _job_session_name(ray_job_id: str, dataset_name: str) -> str:
+def _submission_session_name(ray_submission_id: str, dataset_name: str) -> str:
     agent_slug = _safe_slug(os.environ.get("RL_AGENT", "claude-code"))
     dataset_slug = _safe_slug(dataset_name)
-    job_slug = _safe_slug(ray_job_id)
-    return f"harbor-rollout-{agent_slug}-{dataset_slug}-{job_slug}"
+    submission_slug = _safe_slug(ray_submission_id)
+    return f"harbor-rollout-{agent_slug}-{dataset_slug}-{submission_slug}"
 
 
 def _job_lock(job_slug: str) -> threading.Lock:
@@ -217,58 +205,58 @@ def _clear_cached_job_session(job_slug: str, session_name: str) -> None:
             JOB_ZELLIJ_READY.pop(job_slug, None)
 
 
-def _ensure_job_zellij(
-    ray_job_id: str,
+def _ensure_submission_zellij(
+    ray_submission_id: str,
     dataset_name: str,
     queue_dir: Path,
     model_name: str,
     opik_project_name: str,
 ) -> str:
-    if not ray_job_id:
-        raise ValueError("ray_job_id is required in rollout mode so a worker zellij session can be started")
+    if not ray_submission_id:
+        raise ValueError("ray_submission_id is required in rollout mode so a worker zellij session can be started")
     if not ENABLE_DYNAMIC_JOB_ZELLIJ:
         raise RuntimeError("RL_DYNAMIC_JOB_ZELLIJ=0 is unsupported without a prestarted worker pool")
-    job_slug = _safe_slug(ray_job_id)
-    expected_session = _job_session_name(ray_job_id, dataset_name)
-    ready_session = _cached_job_session(job_slug)
+    submission_slug = _safe_slug(ray_submission_id)
+    expected_session = _submission_session_name(ray_submission_id, dataset_name)
+    ready_session = _cached_job_session(submission_slug)
     if ready_session:
         if _zellij_session_exists(ready_session):
             return ready_session
-        _clear_cached_job_session(job_slug, ready_session)
+        _clear_cached_job_session(submission_slug, ready_session)
 
-    lock = _job_lock(job_slug)
+    lock = _job_lock(submission_slug)
     with lock:
-        ready_session = _cached_job_session(job_slug)
+        ready_session = _cached_job_session(submission_slug)
         if ready_session:
             if _zellij_session_exists(ready_session):
                 return ready_session
-            _clear_cached_job_session(job_slug, ready_session)
+            _clear_cached_job_session(submission_slug, ready_session)
 
         script = SCRIPT_DIR / "ensure_rl_job_zellij.sh"
         if not script.exists():
             raise FileNotFoundError(f"job zellij helper not found: {script}")
         env = os.environ.copy()
         env.update({
-            "RL_ZELLIJ_JOB_ID": ray_job_id,
+            "RL_ZELLIJ_SUBMISSION_ID": ray_submission_id,
             "RL_ZELLIJ_JOB_QUEUE_DIR": str(queue_dir),
             "RL_JOB_RUNTIME_ROOT": str(JOB_RUNTIME_ROOT),
             "RL_MODEL_NAME": model_name,
             "OPIK_PROJECT_NAME": opik_project_name,
         })
         returncode, stdout, stderr = _run_helper(
-            [str(script), ray_job_id, dataset_name, str(queue_dir)],
+            [str(script), ray_submission_id, dataset_name, str(queue_dir)],
             cwd=str(SCRIPT_DIR),
             env=env,
             timeout=float(os.environ.get("RL_JOB_ZELLIJ_START_TIMEOUT", "45")),
         )
         if returncode != 0:
             raise RuntimeError(
-                "failed to ensure job zellij session "
-                f"for ray_job_id={ray_job_id!r}: {stderr or stdout}"
+                "failed to ensure submission zellij session "
+                f"for ray_submission_id={ray_submission_id!r}: {stderr or stdout}"
             )
         session_name = stdout.strip().splitlines()[-1] if stdout.strip() else expected_session
         with JOB_ZELLIJ_LOCKS_GUARD:
-            JOB_ZELLIJ_READY[job_slug] = session_name
+            JOB_ZELLIJ_READY[submission_slug] = session_name
         return session_name
 
 
@@ -352,16 +340,16 @@ def _enqueue_request(request: dict[str, Any]) -> tuple[str, Path]:
     dataset_root = _dataset_root(request.get("dataset_name"), request.get("dataset_root"))
     dataset_name = request.get("dataset_name") or DEFAULT_DATASET_NAME
     model_name = request.get("model_name") or DEFAULT_MODEL_NAME
-    ray_job_id = _extract_ray_job_id(request)
-    opik_project_name = _extract_opik_project_name(request, ray_job_id)
+    ray_submission_id = _extract_ray_submission_id(request)
+    opik_project_name = _extract_opik_project_name(request, ray_submission_id)
     polar_task_id = _extract_polar_task_id(request, session_id)
     display_name = _display_name(task_path.name, polar_task_id, session_id)
-    queue_dir = _queue_for_job(ray_job_id)
+    queue_dir = _queue_for_submission(ray_submission_id)
     pending_dir = queue_dir / "pending"
     results_dir = queue_dir / "results"
     active_dir = queue_dir / "active"
-    zellij_session = _ensure_job_zellij(
-        ray_job_id,
+    zellij_session = _ensure_submission_zellij(
+        ray_submission_id,
         dataset_name,
         queue_dir,
         model_name,
@@ -371,7 +359,7 @@ def _enqueue_request(request: dict[str, Any]) -> tuple[str, Path]:
         **request,
         "request_id": request_id,
         "session_id": session_id,
-        "ray_job_id": ray_job_id,
+        "ray_submission_id": ray_submission_id,
         "polar_task_id": polar_task_id,
         "display_name": display_name,
         "task_id": task_path.name,
@@ -401,7 +389,7 @@ def _enqueue_request(request: dict[str, Any]) -> tuple[str, Path]:
         "task_id": task_path.name,
         "display_name": display_name,
         "session_id": session_id,
-        "ray_job_id": ray_job_id,
+        "ray_submission_id": ray_submission_id,
         "polar_task_id": polar_task_id,
         "model_name": model_name,
         "opik_project_name": opik_project_name,

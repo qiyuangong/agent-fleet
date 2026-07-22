@@ -39,8 +39,8 @@ Agents/utils/rl/
 ├── RL-env.sh                         # RL rollout defaults
 ├── rollout_remote_harbor.py          # Miles/Polar-compatible HTTP listener
 ├── run_rl_rollout_server.sh          # Listener lifecycle wrapper
-├── ensure_rl_job_zellij.sh           # Per-ray-job zellij launcher
-├── gen_rl_rollout_zellij_layout.sh   # Per-job zellij layout generator
+├── ensure_rl_job_zellij.sh           # Per-submission zellij launcher
+├── gen_rl_rollout_zellij_layout.sh   # Per-submission zellij layout generator
 ├── monitor_rl_rollout.sh             # RL job monitor pane
 ├── run_rl_rollout_worker.sh          # Queue worker that reuses harboropik.sh
 └── rl_dataset_worklist.py            # Dataset-to-task-list helper
@@ -141,12 +141,12 @@ zellij run.  `env.sh` then sources `Agents/utils/rl/RL-env.sh` through
 | `RL_LLM_TIMEOUT` / `RL_LLM_MAX_RETRIES` | Mapped into `llm_kwargs.timeout` and `llm_kwargs.max_retries` |
 | `RL_TEMPERATURE` / `RL_TOP_P` / `RL_TOP_K` / `RL_MIN_P` | Mapped into rollout `llm_kwargs` sampling fields |
 | `RL_COLLECT_ROLLOUT_DETAILS` / `RL_ENABLE_SUMMARIZE` | Mapped to claude-code agent kwargs in rollout mode |
-| `RL_MAX_CONCURRENT` / `RL_WORKERS` | Worker count for each per-job zellij session |
+| `RL_MAX_CONCURRENT` / `RL_WORKERS` | Worker count for each per-submission zellij session |
 | `RL_QUEUE_DIR` | Shared queue root for rollout requests |
-| `RL_JOB_QUEUE_ROOT` | Per-ray-job queue root |
-| `RL_JOB_RUNTIME_ROOT` | Per-ray-job zellij runtime root |
+| `RL_JOB_QUEUE_ROOT` | Per-submission queue root |
+| `RL_JOB_RUNTIME_ROOT` | Per-submission zellij runtime root |
 | `RL_TRACE_LOG` | JSONL request/result event log with API keys removed |
-| `RL_DYNAMIC_JOB_ZELLIJ` | Create one zellij session per ray job when enabled; rollout requests are rejected if this is disabled without another worker pool |
+| `RL_DYNAMIC_JOB_ZELLIJ` | Create one zellij session per Ray submission when enabled; rollout requests are rejected if this is disabled without another worker pool |
 
 ## Agent Variables
 
@@ -205,11 +205,13 @@ RL rollout flow:
 
 1. `ROLLOUT=1 start.sh` skips fixed dataset preparation and starts
    `Agents/utils/rl/run_rl_rollout_server.sh`.
-2. `rollout_remote_harbor.py` accepts `/run_trial`, requires a ray job id,
+2. `rollout_remote_harbor.py` accepts `/run_trial`, requires a top-level
+   `ray_submission_id`,
    resolves the requested dataset task, and writes one request JSON into the
-   matching per-job queue.
-3. `ensure_rl_job_zellij.sh` creates a `harbor-rollout-<agent>-<dataset>-<ray_job_id>`
-   zellij session for that ray job if one is not already running.
+   matching per-submission queue.
+3. `ensure_rl_job_zellij.sh` creates a
+   `harbor-rollout-<agent>-<dataset>-<ray_submission_id>` zellij session for
+   that submission if one is not already running.
 4. `run_rl_rollout_worker.sh` claims queued requests and calls
    `Agents/utils/common/Harbor/harboropik.sh`, preserving normal agent logs,
    local dependency cache behavior, Opik tracing, and timeout finalization.

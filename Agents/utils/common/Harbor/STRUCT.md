@@ -13,6 +13,7 @@ Agents/utils/common/Harbor/
 ├── gen_harbor_zellij_layout.sh # zellij layout generator
 ├── monitor_harbor.sh           # Run monitor pane
 ├── run_harbor_worker.sh        # Worker loop for one zellij pane
+├── run_harbor_registry.sh      # Registry runner with optional final-pane hold
 ├── harboropik.sh               # Harbor CLI wrapper with Opik setup
 ├── prepare_local_deps.sh       # Local package/cache preparation
 ├── harbor_prepare_runner_cli.py
@@ -27,7 +28,8 @@ Agents/utils/common/Harbor/
     │   ├── evaluator.py        # Compose one monitor sample
     │   ├── contracts.py        # User, analyzer, and runner output contracts
     │   └── runner.py           # Control commands, retries, and follow loop
-    └── online_rule_analyzer.py # Optional console-only online analysis
+    ├── online_rule_analyzer.py # Optional console-only online analysis
+    └── write_harbor_registry_summary.py # Native registry summary writer
 ```
 
 Analyzer architecture and output boundaries are documented in
@@ -97,6 +99,7 @@ Typical dataset paths:
 | `RUN_ID` | Run name |
 | `OUTPUT_ROOT` | Parent directory for runs |
 | `OUTPUT_PATH` | Full output directory |
+| `HARBOR_ZELLIJ_CLOSE_ON_COMPLETE` | `1` closes fixed benchmark sessions after summary generation; `0` keeps the final pane open |
 | `OPIK_URL` | Opik API URL, usually ending in `/api` |
 | `OPIK_URL_OVERRIDE` | Opik API URL forwarded into task containers |
 | `OPIK_API_KEY` | Opik API key |
@@ -200,6 +203,12 @@ OpenCode:
 3. Each worker pane runs `run_harbor_worker.sh`.
 4. Workers claim tasks from the shared queue and call `harboropik.sh`.
 5. `harboropik.sh` prepares Opik/tracing settings and invokes Harbor with either Claude Code or OpenCode.
+6. When every task is done or failed, `monitor_harbor.sh` writes `$OUTPUT_PATH/summary.txt`, stops the online analyzer, and exits when `HARBOR_ZELLIJ_CLOSE_ON_COMPLETE=1` (the default). With `0`, the final monitor pane remains open for inspection.
+
+Native registry runs use the single-pane layout; `run_harbor_registry.sh`
+wraps `harboropik.sh`, which writes the same summary path from Harbor's job
+result. The wrapper keeps the final registry pane open when the completion
+switch is `0`.
 
 RL rollout flow:
 
@@ -216,6 +225,10 @@ RL rollout flow:
    `Agents/utils/common/Harbor/harboropik.sh`, preserving normal agent logs,
    local dependency cache behavior, Opik tracing, and timeout finalization.
 5. The worker writes the result JSON; the HTTP request returns that result.
+
+RL rollout sessions are not governed by `HARBOR_ZELLIJ_CLOSE_ON_COMPLETE`.
+Their monitor and worker panes are long-running because requests are queued
+dynamically, so rollout session retirement requires a separate idle policy.
 
 ## Optional Harbor Monitor Diagnostics
 

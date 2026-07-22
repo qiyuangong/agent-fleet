@@ -21,7 +21,8 @@ layout {
 
   tab name="registry-run" focus=true {
     pane {
-      command "./harboropik.sh"
+      command "./run_harbor_registry.sh"
+      close_on_exit true
     }
   }
 }

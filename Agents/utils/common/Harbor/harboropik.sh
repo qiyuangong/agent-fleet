@@ -50,13 +50,34 @@ harbor_is_native_registry_main() {
     && [[ "${HARBOR_QUEUE_WORKER:-0}" != "1" ]]
 }
 
+write_harbor_registry_summary() {
+  local exit_code="$1"
+  local job_dir=""
+  local dataset
+
+  [[ "$TB_DRY_RUN" != "1" ]] || return 0
+  [[ -f "$HARBOR_JOB_DIR_FILE" ]] && job_dir="$(cat "$HARBOR_JOB_DIR_FILE" 2>/dev/null || true)"
+  dataset="$(harbor_registry_dataset_name)"
+  python3 "$SCRIPT_DIR/scripts/write_harbor_registry_summary.py" \
+    "$job_dir" "$OUTPUT_PATH/summary.txt" "$exit_code" "$dataset"
+}
+
 if harbor_is_native_registry_main; then
   : > "$HARBOR_JOB_DIR_FILE"
   rm -f "$HARBOR_BENCHMARK_EXIT_FILE"
-  printf '%s\t%s\n' "$BASHPID" "$(awk '{print $22}' "/proc/$BASHPID/stat")" > "$HARBOR_BENCHMARK_PID_FILE"
+  # BASHPID needs bash >= 4; at this top-level scope $$ is the same pid.
+  printf '%s\t%s\n' "${BASHPID:-$$}" "$(awk '{print $22}' "/proc/${BASHPID:-$$}/stat")" > "$HARBOR_BENCHMARK_PID_FILE"
   record_harbor_benchmark_exit() {
     local rc="$?"
+    # The exit file is the completion contract with the registry monitor;
+    # write it before the best-effort summary and analyzer teardown.
     printf '%s\n' "$rc" > "$HARBOR_BENCHMARK_EXIT_FILE"
+    if ! write_harbor_registry_summary "$rc"; then
+      echo "[WARN] failed to write registry summary: $OUTPUT_PATH/summary.txt" >&2
+    fi
+    if ! harbor_stop_online_analysis; then
+      echo "[WARN] failed to stop online analyzer for $OUTPUT_PATH" >&2
+    fi
   }
   trap record_harbor_benchmark_exit EXIT
 fi

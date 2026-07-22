@@ -73,6 +73,30 @@ connection_fields = (
 )
 inherited = {name: os.environ[name] for name in connection_fields if name in os.environ}
 Path(f"{capture}.opik-environment").write_text(json.dumps(inherited, sort_keys=True))
+
+if os.environ.get("HARBOR_CAPTURE_RESULT") == "1":
+    output = Path(args[args.index("-o") + 1]) / "fake-run"
+    output.mkdir(parents=True, exist_ok=True)
+    result = {
+        "finished_at": "2026-07-22T08:00:00Z",
+        "n_total_trials": 2,
+        "stats": {
+            "n_completed_trials": 2,
+            "n_errored_trials": 1,
+            "n_cancelled_trials": 0,
+            "n_retries": 1,
+            "evals": {
+                "fake-eval": {
+                    "n_trials": 2,
+                    "n_errors": 1,
+                    "metrics": [{"mean": 0.5}],
+                    "reward_stats": {"reward": {"1.0": ["trial-1"]}},
+                    "exception_stats": {"RuntimeError": ["trial-2"]},
+                }
+            },
+        },
+    }
+    (output / "result.json").write_text(json.dumps(result), encoding="utf-8")
 PY
 SH
   chmod +x "$path"
@@ -200,6 +224,7 @@ run_harboropik() {
   local dataset_name="${5:-example/dataset@1.0}"
   local include_tasks="${6:-}"
   local trace="${7:-true}"
+  local queue_worker="${8:-1}"
   local opik_base="http://opik.example"
   local opik_url_override="http://opik.example/api"
   local hook_flag="1"
@@ -237,7 +262,7 @@ run_harboropik() {
     DATASET_NAME="$dataset_name" \
     INCLUDE_TASKS="$include_tasks" \
     OUTPUT_PATH="$output_dir/run" \
-    HARBOR_QUEUE_WORKER="1" \
+    HARBOR_QUEUE_WORKER="$queue_worker" \
     OPIK_MODE="remote" \
     OPIK_BASE="$opik_base" \
     OPIK_URL_OVERRIDE="$opik_url_override" \
@@ -256,6 +281,7 @@ run_harboropik() {
     TOTAL_WORKERS="1" \
     TB_MAX_RETRIES="0" \
     HARBOR_CAPTURE_FILE="$capture_file" \
+    HARBOR_CAPTURE_RESULT="1" \
     HARBOR_OPIK_BIN="$capture_bin" \
     HARBOR_OPIK_PYTHON="$capture_bin" \
     OPENCODE_CONFIG_CONTENT="{}" \
@@ -265,9 +291,31 @@ run_harboropik() {
   fi
 }
 
+assert_registry_summary() {
+  local summary="$1"
+  local pattern
+  for pattern in \
+    '^DATASET_NAME: codepde@1\.0$' \
+    '^harbor_exit_code: 0$' \
+    '^total: +2$' \
+    '^completed: +2$' \
+    '^errored: +1$' \
+    '^Harbor stats:$' \
+    '^ +"1\.0": \[$' \
+    '^ +"RuntimeError": \[$' \
+    '^  result: +.*/fake-run/result\.json$'
+  do
+    if ! grep -Eq "$pattern" "$summary"; then
+      cat "$summary" >&2
+      echo "registry summary missing expected pattern: $pattern" >&2
+      return 1
+    fi
+  done
+}
+
 main() {
   local tmp fake_bin default_overlay claude_capture opencode_capture capture_bin
-  local seta_capture sweverify_capture traceoff_capture traceoff_oc_capture
+  local seta_capture sweverify_capture registry_capture traceoff_capture traceoff_oc_capture
   tmp="$(mktemp -d)"
   TEST_TMP_DIR="$tmp"
   trap 'rm -rf "$TEST_TMP_DIR"' EXIT
@@ -285,6 +333,12 @@ main() {
     "codepde@1.0"
   assert_extra_compose_arg "$claude_capture" "$default_overlay"
   assert_arg_pair "$claude_capture" "--dataset" "codepde@1.0"
+
+  registry_capture="$tmp/claude-registry.args"
+  run_harboropik \
+    "claude-code" "$capture_bin" "$registry_capture" "$tmp/claude-registry" \
+    "codepde@1.0" "" "true" "0"
+  assert_registry_summary "$tmp/claude-registry/run/summary.txt"
 
   opencode_capture="$tmp/opencode-default.args"
   run_harboropik \

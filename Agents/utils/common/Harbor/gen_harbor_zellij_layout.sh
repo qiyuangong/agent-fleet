@@ -12,6 +12,7 @@ emit_worker_pane() {
         pane {
           command "./run_harbor_worker.sh"
           args "$worker_id"
+          close_on_exit true
         }
 EOF
 }
@@ -34,6 +35,7 @@ layout {
     pane split_direction="vertical" {
       pane size="50%" {
         command "./monitor_harbor.sh"
+        close_on_exit true
       }
       pane size="50%" split_direction="horizontal" {
 EOF

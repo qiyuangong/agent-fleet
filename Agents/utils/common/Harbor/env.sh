@@ -77,6 +77,7 @@ HARBOR_ONLINE_ANALYSIS_DIR="${HARBOR_ONLINE_ANALYSIS_DIR:-${OUTPUT_PATH}/online-
 HARBOR_ONLINE_ANALYSIS_PID_FILE="${HARBOR_ONLINE_ANALYSIS_PID_FILE:-${RUNTIME_DIR}/online-rule-analyzer.pid}"
 HARBOR_ONLINE_ANALYSIS_LOG_FILE="${HARBOR_ONLINE_ANALYSIS_LOG_FILE:-${RUNTIME_DIR}/online-rule-analyzer.log}"
 HARBOR_EARLY_STOP="${HARBOR_EARLY_STOP:-0}"
+HARBOR_ZELLIJ_CLOSE_ON_COMPLETE="${HARBOR_ZELLIJ_CLOSE_ON_COMPLETE:-1}"
 HARBOR_MONITOR_ENABLED="${HARBOR_MONITOR_ENABLED:-1}"
 HARBOR_MONITOR_DIR="${HARBOR_MONITOR_DIR:-${OUTPUT_PATH}/monitor}"
 HARBOR_MONITOR_PID_FILE="${HARBOR_MONITOR_PID_FILE:-${RUNTIME_DIR}/harbor-monitor.pid}"
@@ -365,7 +366,7 @@ RL_ENABLE_SUMMARIZE="${RL_ENABLE_SUMMARIZE:-false}"
 
 export SCRIPT_DIR REPO_ROOT AGENTS_DIR TASKS_DIR HARBOR_CLAUDE_CODE_DIR HARBOR_OPENCODE_DIR WORKSPACE_DIR RUN_ID TOTAL_WORKERS N_ATTEMPTS MODEL AGENT MAX_RETRIES
 export HARBOR_ROOT DATASET_PATH DATASET_NAME METRIC_MODE OUTPUT_ROOT OUTPUT_PATH TASK_SOURCE_FILE TASK_FILE QUEUE_DIR RUNTIME_DIR LAYOUT_FILE JOBS_ROOT
-export HARBOR_ONLINE_ANALYSIS HARBOR_ONLINE_ANALYSIS_POLL_INTERVAL HARBOR_ONLINE_ANALYSIS_DIR HARBOR_ONLINE_ANALYSIS_PID_FILE HARBOR_ONLINE_ANALYSIS_LOG_FILE HARBOR_EARLY_STOP
+export HARBOR_ONLINE_ANALYSIS HARBOR_ONLINE_ANALYSIS_POLL_INTERVAL HARBOR_ONLINE_ANALYSIS_DIR HARBOR_ONLINE_ANALYSIS_PID_FILE HARBOR_ONLINE_ANALYSIS_LOG_FILE HARBOR_EARLY_STOP HARBOR_ZELLIJ_CLOSE_ON_COMPLETE
 export HARBOR_MONITOR_ENABLED HARBOR_MONITOR_DIR HARBOR_MONITOR_PID_FILE HARBOR_MONITOR_LOG_FILE HARBOR_BENCHMARK_PID_FILE HARBOR_BENCHMARK_EXIT_FILE HARBOR_JOB_DIR_FILE HARBOR_MONITOR_RESTART_CMD HARBOR_MONITOR_STOP_CMD HARBOR_MONITOR_INTERVAL HARBOR_MONITOR_STARTUP_GRACE HARBOR_MONITOR_STALL_SECONDS HARBOR_MONITOR_MAX_RETRIES HARBOR_MONITOR_CONFIGURED_TIMEOUT
 export API_KEY BASE_URL HARBOR_ANALYZER_API_KEY HARBOR_ANALYZER_BASE_URL HARBOR_ANALYZER_MODEL HARBOR_ANALYZER_PI_PROVIDER HARBOR_ANALYZER_NO_PROXY TRACE_TO_OPIK OPIK_URL OPIK_URL_OVERRIDE OPIK_BASE OPIK_MODE OPIK_PROJECT_NAME OPIK_API_KEY OPIK_WORKSPACE CC_OPIK_DEBUG
 export CLAUDE_CODE_VERSION CLAUDE_CODE_TGZ_BASENAME LOCAL_WHEEL_DIR LOCAL_WHEEL_PORT LOCAL_WHEEL_PORT_ATTEMPTS LOCAL_WHEEL_HOST_IP
@@ -431,6 +432,42 @@ harbor_monitor_pid_matches_run() {
   [[ "$script_seen" == 1 && "$run_seen" == 1 ]]
 }
 
+harbor_online_analysis_pid_matches_run() {
+  local pid="$1" arg script_seen=0 run_seen=0
+  [[ "$pid" =~ ^[0-9]+$ && -r "/proc/$pid/cmdline" ]] || return 1
+  while IFS= read -r -d '' arg; do
+    [[ "$arg" == "$SCRIPT_DIR/scripts/online_rule_analyzer.py" ]] && script_seen=1
+    [[ "$arg" == "$OUTPUT_PATH" ]] && run_seen=1
+  done < "/proc/$pid/cmdline"
+  [[ "$script_seen" == 1 && "$run_seen" == 1 ]]
+}
+
+harbor_stop_online_analysis() {
+  [[ -f "$HARBOR_ONLINE_ANALYSIS_PID_FILE" ]] || return 0
+  local pid sid signal_target
+  pid="$(cat "$HARBOR_ONLINE_ANALYSIS_PID_FILE" 2>/dev/null || true)"
+  if [[ ! "$pid" =~ ^[0-9]+$ ]] || ! kill -0 "$pid" >/dev/null 2>&1; then
+    rm -f "$HARBOR_ONLINE_ANALYSIS_PID_FILE"
+    return 0
+  fi
+  if ! harbor_online_analysis_pid_matches_run "$pid"; then
+    echo "[ERROR] refusing to stop unrelated process from $HARBOR_ONLINE_ANALYSIS_PID_FILE: pid=$pid" >&2
+    return 1
+  fi
+  sid="$(ps -o sid= -p "$pid" 2>/dev/null | tr -d ' ' || true)"
+  signal_target="$pid"
+  [[ "$sid" == "$pid" ]] && signal_target="-$pid"
+  kill -TERM -- "$signal_target" >/dev/null 2>&1 || true
+  for _ in $(seq 1 30); do
+    kill -0 "$pid" >/dev/null 2>&1 || break
+    sleep 1
+  done
+  if kill -0 "$pid" >/dev/null 2>&1; then
+    kill -KILL -- "$signal_target" >/dev/null 2>&1 || true
+  fi
+  rm -f "$HARBOR_ONLINE_ANALYSIS_PID_FILE"
+}
+
 harbor_stop_monitor() {
   [[ -f "$HARBOR_MONITOR_PID_FILE" ]] || return 0
   local pid sid signal_target
@@ -459,13 +496,7 @@ harbor_stop_monitor() {
 
 harbor_reset_run_state() {
   harbor_stop_monitor
-  if [[ -f "$HARBOR_ONLINE_ANALYSIS_PID_FILE" ]]; then
-    local online_pid
-    online_pid="$(cat "$HARBOR_ONLINE_ANALYSIS_PID_FILE" 2>/dev/null || true)"
-    if [[ -n "$online_pid" ]]; then
-      kill "$online_pid" >/dev/null 2>&1 || true
-    fi
-  fi
+  harbor_stop_online_analysis
   rm -f "$QUEUE_DIR"/worker-*.current "$LOCK_FILE" "$WORKERS_READY_FILE" "$WORKERS_FAILED_FILE"
   rm -f "$NEXT_INDEX_FILE"
   rm -f "$OUTPUT_PATH/.monitor_state.json" "$HARBOR_MONITOR_LOG_FILE" "$HARBOR_BENCHMARK_PID_FILE" "$HARBOR_BENCHMARK_EXIT_FILE" "$HARBOR_JOB_DIR_FILE"

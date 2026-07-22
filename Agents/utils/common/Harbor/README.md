@@ -12,6 +12,15 @@ bash start.sh --detach
 
 Use `bash start.sh` instead of `--detach` for an interactive zellij session.
 
+When every task has finished, the monitor writes a final summary to
+`$OUTPUT_PATH/summary.txt` (counts, reward rollup, result paths). Fixed
+benchmark sessions close by default; set `HARBOR_ZELLIJ_CLOSE_ON_COMPLETE=0`
+to keep the final pane open for inspection. All per-task results stay on disk
+under `$OUTPUT_PATH`.
+
+This completion switch does not apply to RL rollout sessions, whose workers
+serve a dynamic request queue rather than a fixed task total.
+
 Optional console-only online analysis:
 
 ```bash

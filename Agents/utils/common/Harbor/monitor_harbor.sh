@@ -142,10 +142,9 @@ else:
 PY
 }
 
-while true; do
-  # Detached zellij panes may not have TERM set; do not let clear kill monitor.
-  clear 2>/dev/null || printf '\033[H\033[2J'
+SUMMARY_FILE="$OUTPUT_PATH/summary.txt"
 
+collect_counts() {
   total="$(harbor_task_count)"
   next="$(next_index)"
   done_n="$(count_done)"
@@ -159,7 +158,16 @@ while true; do
   if [[ "$remaining" -lt 0 ]]; then
     remaining=0
   fi
+}
 
+all_tasks_finished() {
+  [[ "$total" -gt 0 ]] || return 1
+  [[ "$running_n" -eq 0 ]] || return 1
+  [[ $((done_n + failed_n)) -ge "$total" ]] || return 1
+}
+
+render_report() {
+  local prep_status
   echo "RUN_ID:      $RUN_ID"
   echo "AGENT:       $AGENT"
   echo "DATASET_NAME: $(harbor_dataset_kind)"
@@ -211,8 +219,9 @@ while true; do
   echo
   echo "active workers:"
 
-  found_any=0
-  col=0
+  local found_any=0
+  local col=0
+  local f worker_id current current_idx item
   while IFS= read -r f; do
     [[ -e "$f" ]] || continue
     found_any=1
@@ -232,6 +241,48 @@ while true; do
     echo "(none)"
   elif [[ $((col % 6)) -ne 0 ]]; then
     printf '\n'
+  fi
+}
+
+write_summary() {
+  local tmp_file="${SUMMARY_FILE}.tmp"
+  {
+    echo "finished_at: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+    render_report
+    echo
+    echo "result paths:"
+    echo "  output:          $OUTPUT_PATH"
+    echo "  done:            $QUEUE_DIR/done.txt"
+    echo "  failed:          $QUEUE_DIR/failed.txt"
+    echo "  worker logs:     $RUNTIME_DIR/worker-logs"
+    if [[ "$HARBOR_ONLINE_ANALYSIS" == "1" ]]; then
+      echo "  online analysis: $HARBOR_ONLINE_ANALYSIS_DIR"
+    fi
+  } > "$tmp_file"
+  mv -f "$tmp_file" "$SUMMARY_FILE"
+}
+
+while true; do
+  collect_counts
+
+  # Detached zellij panes may not have TERM set; do not let clear kill monitor.
+  clear 2>/dev/null || printf '\033[H\033[2J'
+  render_report
+
+  if all_tasks_finished; then
+    write_summary
+    echo
+    echo "all tasks finished; summary saved to $SUMMARY_FILE"
+    if ! harbor_stop_online_analysis; then
+      echo "[WARN] failed to stop online analyzer for $OUTPUT_PATH" >&2
+    fi
+    if [[ "$HARBOR_ZELLIJ_CLOSE_ON_COMPLETE" == "1" ]]; then
+      exit 0
+    fi
+    echo "HARBOR_ZELLIJ_CLOSE_ON_COMPLETE=0; keeping final monitor pane open"
+    while true; do
+      sleep 3600
+    done
   fi
 
   sleep 2

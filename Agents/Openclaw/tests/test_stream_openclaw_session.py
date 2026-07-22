@@ -7,8 +7,9 @@ from unittest import mock
 
 
 def _load_module():
-    root = Path(__file__).resolve().parents[2]
-    module_path = root / "openclaw" / "scripts" / "stream_openclaw_session.py"
+    module_path = (
+        Path(__file__).resolve().parents[1] / "scripts" / "stream_openclaw_session.py"
+    )
     spec = importlib.util.spec_from_file_location("stream_openclaw_session", module_path)
     module = importlib.util.module_from_spec(spec)
     assert spec is not None and spec.loader is not None

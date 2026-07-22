@@ -1,71 +1,104 @@
 # SII Agent Fleet
 
-SII Agent Fleet provides runnable agent integrations and benchmark task lists for evaluating Claude Code, OpenCode, and OpenClaw.
+SII Agent Fleet provides runnable integrations and benchmark tasksets for
+evaluating Claude Code, OpenCode, and OpenClaw.
 
 ## Quick Start
 
-### Step 0 — Prerequisites
+### 1. Install prerequisites
 
-Install before you begin:
+- Docker with Docker Compose v2
+- Python 3.9 or newer
+- `git`, `curl`, `jq`, `openssl`, `tmux`, and `zellij`
 
-* Docker + Docker Compose v2
-* Python >= 3.9
-* git, curl, jq, openssl
-* tmux + zellij — verified on tmux 3.2a / zellij 0.44.3
-  (`sudo apt install tmux`; zellij via [releases](https://github.com/zellij-org/zellij/releases))
+Install tmux with your package manager and install Zellij from its
+[releases page](https://github.com/zellij-org/zellij/releases). `setup.sh`
+below installs Node.js and Claude Code for you.
 
-> Only Docker Compose v2 and Python >= 3.9 have a minimum version; the rest just need to be installed.
-> Node.js >= 18 and Claude Code are installed automatically by `setup.sh` — no need to install them manually.
+### 2. Clone the repository
 
 ```bash
-# Clone this repo to local disk
 git clone --recurse-submodules https://github.com/sii-system/sii-agent-fleet.git
 cd sii-agent-fleet
 ```
 
-### Step 1 — Configure
+### 3. Configure and set up
 
-Export your model gateway credentials:
+Run the commands below, replacing the example values with your model gateway
+credentials. Opik tracing is on by default; setup persists whichever tracing
+choice you make:
 
 ```bash
-export BASE_URL=https://your-model-gateway.example.com   # Model gateway URL, WITHOUT /v1
-export API_KEY=your-api-key                         # Model gateway API key
-export MODEL=your_model_id
-export TRACE_TO_OPIK=true                           # Set false to disable Opik fleet-wide
-export OPIK_URL=https://your-opik-host/api          # Opik tracing endpoint, used by the Harbor/ClawBio runtime
+export BASE_URL=https://your-model-gateway.example.com  # Do not include /v1
+export API_KEY=your-api-key
+export MODEL=your-model-id
+
+export TRACE_TO_OPIK=false                       # run without an Opik server
+# export OPIK_URL=https://your-opik-host/api     # or keep tracing on and point it here
+
+REPO_DIR="$PWD" ./scripts/setup.sh
 ```
 
-`OPIK_URL` is required by the benchmark runtime while tracing is enabled
-(the default); setup only persists it into `config.local.env`. To run
-without an Opik server, set `TRACE_TO_OPIK=false`; this also disables the
-OpenClaw plugin and PinchBench tracer paths.
+`REPO_DIR="$PWD"` points setup at this checkout instead of its default
+`$HOME/sii-agent-fleet` clone.
 
-### Step 2 — Run setup.sh
+### 4. Run one benchmark
+
+Validate the environment with a one-task canary first:
 
 ```bash
-./scripts/setup.sh          # one-shot environment bootstrap
+TB_MIN_TEST=1 ./scripts/run_fleet.sh \
+  --taskset terminalbench21 \
+  --agent claude-code \
+  --workers 1
 ```
 
-### Step 3 — Run a fleet
+Then start the full benchmark, with direct arguments or in natural language
+(AI mode):
 
 ```bash
-./scripts/run_fleet.sh --taskset <taskset> [--agent <agent>] [--workers <n>] [options]
+./scripts/run_fleet.sh --taskset terminalbench21 --agent claude-code --workers 10
+./scripts/run_fleet.sh --prompt "Run terminalbench21 with claude-code and 10 workers"
 ```
 
-* `--taskset <taskset>` — required, taskset to run
-* `--agent claude-code|opencode|openclaw` — optional; `openclaw` is for OpenClaw tasksets
-* `--workers <n>` — optional, concurrency (default `10`)
+The first run is slower while Harbor downloads the taskset and Docker images.
+Rerun `setup.sh` only when configuration changes.
 
-## Rerun
+## FleetSpec runs
 
 ```bash
-# ./scripts/setup.sh    # re-run only if config changed
-./scripts/run_fleet.sh --taskset <taskset>
+# One saved FleetSpec file
+./scripts/run_fleet.sh --spec fleet-spec.json
+
+# Multiple runs launch concurrently: one JSON array file, several files, or both
+./scripts/run_fleet.sh --spec run-a.json run-b.json
+```
+
+| Flag | Short | Purpose |
+| --- | --- | --- |
+| `--taskset` | `-t` | Taskset to run |
+| `--agent` | `-a` | `claude-code`, `opencode`, or `openclaw` |
+| `--workers` | `-n` | Concurrency |
+| `--prompt` | `-p` | Natural-language run request (AI mode) |
+| `--spec` | `-s` | FleetSpec file(s) |
+| `--output` | `-o` | Save the validated spec |
+| `--dry-run` | — | Preview the commands without running |
+| `--detach` | `-d` | Harbor detached mode (automatic for multi-run) |
+
+See [scripts/README.md](./scripts/README.md) for the FleetSpec format,
+tasksets, and agents.
+
+On hosts where Docker Hub needs registry mirrors, wrap the same arguments with
+the Docker-in-Docker launcher instead:
+
+```bash
+./scripts/dind-run.sh --taskset terminalbench21 --agent claude-code --workers 1
 ```
 
 ## More details
 
-- Scripts (setup.sh / run_fleet.sh): [scripts/README.md](./scripts/README.md)
+- Launch modes and limitations:
+  [scripts/README.md](./scripts/README.md#current-limitations)
 - Skills: [skills/README.md](./skills/README.md)
 - Repository structure: [STRUCT.md](./STRUCT.md)
 - Harbor runner: [Agents/utils/common/Harbor/STRUCT.md](./Agents/utils/common/Harbor/STRUCT.md)

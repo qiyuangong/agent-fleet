@@ -38,7 +38,7 @@ MODEL=glm-5.1-fp8 \
 <summary>What setup.sh does</summary>
 
 1. Gather model endpoint config (interactive prompt or env vars)
-2. Check base dependencies (git / curl / docker / python3)
+2. Check base dependencies (git / curl / jq / docker / python3)
 3. Install Node.js via nvm (if missing or < 18)
 4. Install Claude Code (pinned to 2.1.90)
 5. Write env vars to `~/.bashrc`
@@ -53,7 +53,7 @@ MODEL=glm-5.1-fp8 \
 
 - `~/.bashrc`: wrapped in a marker block `# >>> sii-agent-fleet env >>>`, the whole block is replaced each run
 - `~/.claude/settings.json`: managed keys are merged, user customizations preserved
-- `config.local.env`: only managed keys are updated, comments and other keys are preserved
+- `config.local.env`: only managed keys (`BASE_URL` / `API_KEY` / `MODEL`, plus `TRACE_TO_OPIK` and `OPIK_*` when set) are updated; comments and other keys are preserved
 - A backup is taken before each modification (`*.bak.sii-agent-fleet`)
 
 Safe to re-run.
@@ -74,12 +74,12 @@ Safe to re-run.
 
 | Option | Description |
 | --- | --- |
-| `-t, --taskset <value>` | Harbor taskset, explicit local path, `pinchbench`, or `clawbio` |
+| `-t, --taskset <value>` | Built-in alias (`seta`, `smith`, `terminalbench21`, `sweverify`), registry ID, explicit local path, `pinchbench`, or `clawbio` |
 | `-a, --agent <name>` | Optional Harbor agent override; `openclaw` is accepted for consistent OpenClaw commands |
 | `-n, --workers <n>` | Harbor workers or OpenClaw fleet instances |
 | `-s, --spec <file|-> [files...]` | Read one or more FleetSpec v1 objects or arrays; multiple runs are detected automatically |
-| `-d, --detach` | Start Harbor in its detached Zellij mode; ignored with a warning for OpenClaw tasksets |
-| `-p, --prompt <text>` | Translate, validate, and run one natural-language benchmark request |
+| `-d, --detach` | Start Harbor in its detached Zellij mode; implied for multi-run spec input; ignored with a warning for OpenClaw tasksets |
+| `-p, --prompt <text>` | Translate, validate, and run a natural-language benchmark request (one or more runs, up to 16) |
 | `-o, --output <file>` | Atomically save the validated FleetSpec object or flattened array before running |
 | `--dry-run` | Print the downstream command and environment without running it |
 
@@ -120,7 +120,7 @@ Create `fleet-spec.json` with any text editor, for example
 | Field | Required | Value |
 | --- | --- | --- |
 | `schema_version` | Yes | Must be `1` |
-| `taskset` | Yes | Registry ID, explicit local path, `pinchbench`, or `clawbio` |
+| `taskset` | Yes | Built-in alias (`seta`, `smith`, `terminalbench21`, `sweverify`), registry ID, explicit local path, `pinchbench`, or `clawbio` |
 | `agent` | No | Agent passed to the selected runner |
 | `workers` | No | Integer from 1 to 4096 |
 
@@ -319,6 +319,65 @@ OpenClaw taskset, the router prints the requested and actual agents, ignores the
 conflicting value, and continues with OpenClaw. OpenClaw runners remain in the
 foreground; `--detach` is ignored with a warning.
 
+### Current limitations
+
+The following requests are rejected or ignored by the current launch
+interfaces:
+
+- FleetSpec accepts only `schema_version`, `taskset`, and optional `agent` and
+  `workers`. Unknown fields and invalid values are rejected. It cannot set a
+  per-run model, task subset, timeout, retry policy, or environment variables;
+  configure those in the caller environment, where they apply to every spec of
+  the invocation and cannot vary between specs.
+- Each `--spec` input (file or `-`) must contain exactly one JSON value: one
+  FleetSpec object or a non-empty array of them. Several files are flattened in
+  command-line order; `-` cannot be combined with file inputs. If any input is
+  invalid, nothing is launched.
+- Multi-run execution is concurrent only. It does not support ordered runs,
+  dependencies, queues, or a concurrency cap; Prompts that require those
+  behaviors are rejected.
+- A multi-run invocation may contain at most one OpenClaw run; a second
+  `pinchbench` or `clawbio` spec rejects the whole invocation before launch.
+- The OpenClaw fleet is a machine-wide singleton beyond a single invocation.
+  Launching `clawbio` while another OpenClaw run is active tears down and
+  recreates the running fleet's containers without warning; `pinchbench`
+  reuses the running fleet and contends for its state instead of tearing it
+  down. Either way, run OpenClaw tasksets one at a time per host.
+- Unique per-run `RUN_ID`s are generated only for multi-run `--spec` input.
+  Separate single-run invocations keep Harbor's default minute-resolution
+  `RUN_ID`, so concurrent manual launches must set distinct `RUN_ID` values
+  themselves.
+- When rollout is enabled (`ROLLOUT=1`), a multi-run invocation may contain
+  only one Harbor run, because rollout listeners share `RL_PORT`.
+- Each requested run in a Prompt must identify one unambiguous taskset;
+  distinct runs may use distinct tasksets. A Prompt may request at most 16
+  runs.
+- Prompt mode supports `claude-code` and `opencode` for Harbor tasksets and
+  `openclaw` for `pinchbench` or `clawbio`. Other agents, including
+  Terminus-2, are rejected.
+- `pinchbench` and `clawbio` always use OpenClaw. Prompt mode rejects a
+  different agent; Direct mode warns and ignores it.
+- `--prompt` must be the first argument. `--spec` cannot be combined with
+  `--taskset`, `--agent`, or `--workers`.
+- `--detach` is redundant for multi-run input: Harbor runs always detach there
+  (an informational notice is printed), while OpenClaw runners stay in the
+  foreground and ignore `--detach` with a warning in every mode.
+- Opik tracing is on by default, and the benchmark runtime then requires
+  `OPIK_URL`. `TRACE_TO_OPIK` is the single tracing switch for every runner
+  (Harbor, worker, rollout, DinD, ClawBio, PinchBench), and only the literal
+  values `false` or `0` disable it — any other spelling keeps tracing on.
+- With `TRACE_TO_OPIK=false` there are no traces and no dashboard, Opik
+  settings are not exposed to task containers, and the Claude realtime hook
+  stays off even if `TB_CC_OPIK_ENABLE_HOOK=1` is set. `TRACE_TO_OPIK=false`
+  is authoritative in ClawBio: it forces `OPIK_PLUGIN=disabled` even over an
+  explicit `OPIK_PLUGIN=enabled`; with tracing on, an explicit `OPIK_PLUGIN`
+  wins and `OPIK_PLUGIN=enabled` requires `OPIK_URL`.
+- PinchBench refuses a `TRACE_TO_OPIK=false` run while the OpenClaw gateway
+  configs still enable the Opik tracer plugin; regenerate the fleet with
+  `TRACE_TO_OPIK=false ./Agents/Openclaw/scripts/setup.sh <n>` first.
+- The parent directory for `--output` must already exist. A successful write
+  replaces an existing file at the same path.
+
 ---
 
 ## dind-run.sh
@@ -355,9 +414,13 @@ When invoked inside a container, the launcher warns and delegates directly to
 3. Start or reuse a privileged container from that image.
 4. Pass each mirror and default address pool as Docker daemon flags.
 5. Mount the repo at the same absolute path inside DinD.
-6. Forward configured HTTP(S) proxy settings and a no-proxy list that includes
-   the model and Opik hosts.
-7. Run `scripts/setup.sh` inside DinD unless `DIND_BOOTSTRAP=skip`.
+6. Forward configured HTTP(S) proxy settings, a no-proxy list that includes
+   the model and Opik hosts, and — when set — tracing settings
+   (`TRACE_TO_OPIK`, `OPIK_URL`, `OPIK_API_KEY`, `OPIK_WORKSPACE`,
+   `OPIK_PROJECT_NAME`), local Claude package paths, and package mirrors.
+7. Run `scripts/setup.sh` inside DinD per `DIND_BOOTSTRAP` (`always` every
+   time, `missing` only when Claude Code or the skills plugin is absent,
+   `skip` never).
 8. Run `scripts/run_fleet.sh` inside DinD with the same arguments.
 
 </details>

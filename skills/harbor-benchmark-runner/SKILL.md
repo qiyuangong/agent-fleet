@@ -56,11 +56,10 @@ orchestration ownership in `Agents/utils/common/Harbor/`.
 - For Claude Code in restricted-network environments, prefer a mounted
   `claude-code-<version>.tgz` plus npm cache over downloading from the public
   Claude installer during each task.
-- Harbor only adds the Claude Code tgz and wheel/cache mounts when the Claude
-  hook mount path is enabled. Set `TB_CC_OPIK_ENABLE_HOOK=1`, then point
-  `TB_CC_CLAUDE_TGZ_SOURCE` at the local tgz and
+- Harbor mounts the Claude Code tgz and wheel/cache independently of the Opik
+  hook. Point `TB_CC_CLAUDE_TGZ_SOURCE` at the local tgz and
   `TB_CC_PY_WHEEL_DIR_SOURCE` at the cache directory that contains
-  `npm-cache/`.
+  `npm-cache/`; enable `TB_CC_OPIK_ENABLE_HOOK=1` only for traced runs.
 - After a mounted-tgz run starts, confirm task `config.json`, `lock.json`, or
   `trial.log` includes `/opt/tb-opik/claude-code.tgz` and
   `/opt/tb-opik/python-wheels/npm-cache`. If the task still attempts

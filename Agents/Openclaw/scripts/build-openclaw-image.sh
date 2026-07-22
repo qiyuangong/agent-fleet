@@ -17,7 +17,33 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 REPO_ROOT="$(cd "$PROJECT_DIR/../.." && pwd)"
 
+# Match setup.sh's configuration precedence. Save the caller environment first
+# so one-off overrides remain stronger than config files.
+__caller_env="$(export -p)"
+for config_file in \
+  "$REPO_ROOT/config.env" \
+  "$REPO_ROOT/config.local.env" \
+  "$PROJECT_DIR/config/fleet.env"; do
+  if [ -f "$config_file" ]; then
+    # shellcheck source=/dev/null
+    . "$config_file"
+  fi
+done
+eval "$__caller_env"
+unset __caller_env config_file
+
 OPENCLAW_REPO="${OPENCLAW_REPO:-https://github.com/openclaw/openclaw.git}"
+
+# Keep the top-level tracing switch authoritative over stale fleet/plugin
+# configuration, matching setup.py and the benchmark launchers.
+case "${TRACE_TO_OPIK:-true}" in
+  false|0)
+    if [ "${OPIK_PLUGIN:-}" = "enabled" ]; then
+      echo "TRACE_TO_OPIK=false overrides OPIK_PLUGIN=enabled; tracing plugin disabled" >&2
+    fi
+    OPIK_PLUGIN=disabled
+    ;;
+esac
 
 OPENCLAW_CACHE="$PROJECT_DIR/cache/openclaw"
 OPENCLAW_SESSION_AFFINITY_PATCH="$PROJECT_DIR/patches/openclaw/openclaw-session-affinity.patch"
@@ -135,10 +161,12 @@ fi
 
 # ── Step 4: Build openclaw:local-opik ──
 echo "Building openclaw:local-opik..."
-docker_build_load openclaw:local-opik \
-  "${OPIK_DOCKER_BUILD_ARGS[@]}" \
-  -f "$PROJECT_DIR/Dockerfile.opik" \
+OPIK_DOCKER_BUILD_ARGS+=(
+  -f "$PROJECT_DIR/Dockerfile.opik"
   "$REPO_ROOT"
+)
+docker_build_load openclaw:local-opik \
+  "${OPIK_DOCKER_BUILD_ARGS[@]}"
 
 echo ""
 echo "Done. Image: openclaw:local-opik"

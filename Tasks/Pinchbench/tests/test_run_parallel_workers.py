@@ -263,11 +263,14 @@ class BenchmarkCommandTests(unittest.TestCase):
             fleet_env = tmp_path / "fleet.env"
             generated_env = tmp_path / ".env"
             pinchbench_env = tmp_path / "pinchbench.env"
-            config_env.write_text("MODEL=shared-model\n", encoding="utf-8")
+            config_env.write_text(
+                "MODEL=shared-model\nTRACE_TO_OPIK=false\n",
+                encoding="utf-8",
+            )
             config_local_env.write_text("", encoding="utf-8")
             fleet_env.write_text("COUNT=2\n", encoding="utf-8")
             generated_env.write_text("", encoding="utf-8")
-            pinchbench_env.write_text("", encoding="utf-8")
+            pinchbench_env.write_text("TRACE_TO_OPIK=true\n", encoding="utf-8")
 
             with mock.patch.object(self.runner, "CONFIG_ENV_FILE", config_env), \
                  mock.patch.object(self.runner, "CONFIG_LOCAL_ENV_FILE", config_local_env), \
@@ -278,6 +281,7 @@ class BenchmarkCommandTests(unittest.TestCase):
                 config = self.runner.load_runner_config()
 
         self.assertEqual(config["MODEL"], "shared-model")
+        self.assertEqual(config["TRACE_TO_OPIK"], "false")
 
     def test_runner_config_resolves_relative_local_repo_url_from_repo_root(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -303,6 +307,35 @@ class BenchmarkCommandTests(unittest.TestCase):
             str((repo_root / "../skills").resolve()),
         )
 
+    def test_trace_off_rejects_stale_gateway_opik_config(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config_base = Path(tmp)
+            instance_dir = config_base / "1"
+            instance_dir.mkdir()
+            (instance_dir / "openclaw.json").write_text(
+                '{"plugins":{"allow":["openai","openclaw-opik-tracer"],'
+                '"entries":{"openclaw-opik-tracer":{"enabled":true}}}}',
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(
+                SystemExit,
+                r"TRACE_TO_OPIK=false.*instance 1.*setup\.sh.*restart",
+            ):
+                self.runner.validate_trace_off_gateway_configs(config_base, 1)
+
+    def test_trace_off_accepts_gateway_without_opik_plugin(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config_base = Path(tmp)
+            instance_dir = config_base / "1"
+            instance_dir.mkdir()
+            (instance_dir / "openclaw.json").write_text(
+                '{"plugins":{"allow":["openai"],"entries":{}}}',
+                encoding="utf-8",
+            )
+
+            self.runner.validate_trace_off_gateway_configs(config_base, 1)
+
     def test_worker_command_uses_private_home_without_su_or_root_uv_copy(self):
         command = self.runner.wrap_worker_command(
             run_as_user="node",
@@ -321,6 +354,18 @@ class BenchmarkCommandTests(unittest.TestCase):
         self.assertIn("PINCHBENCH_OPIK_DRAIN_SECONDS", command)
         self.assertIn("openclaw_opik_tracer.py", command)
 
+    def test_trace_off_worker_command_skips_opik_state_and_drain(self):
+        command = self.runner.wrap_worker_command(
+            run_as_user="node",
+            bench_cmd="echo test",
+            tracing_enabled=False,
+        )
+
+        self.assertNotIn("PINCHBENCH_RESET_GATEWAY_OPIK_STATE", command)
+        self.assertNotIn("pinchbench-opik-state", command)
+        self.assertNotIn("PINCHBENCH_OPIK_DRAIN_SECONDS", command)
+        self.assertNotIn("openclaw_opik_tracer.py", command)
+
     def test_worker_command_does_not_chown_openclaw_state_or_workspace(self):
         command = self.runner.wrap_worker_command(
             run_as_user="node",
@@ -335,11 +380,50 @@ class BenchmarkCommandTests(unittest.TestCase):
         )
 
         self.assertIn("/opt/opik-venv", dockerfile)
-        self.assertIn("FROM openclaw:local-opik", dockerfile)
+        self.assertIn("ARG OPENCLAW_BASE_IMAGE=openclaw:local-opik", dockerfile)
+        self.assertIn("FROM ${OPENCLAW_BASE_IMAGE}", dockerfile)
+        self.assertIn('ARG TRACE_TO_OPIK=true', dockerfile)
+        self.assertIn("/opt/pinchbench-trace-to-opik", dockerfile)
         self.assertNotIn("cache/" + "sii-opik", dockerfile)
         self.assertIn("opik>=1.0.0", dockerfile)
         self.assertIn("uuid6", dockerfile)
         self.assertIn("socksio", dockerfile)
+
+    def test_trace_off_image_path_uses_local_base_without_opik_probe(self):
+        config = {"PINCHBENCH_DOCKER_IMAGE": "pinchbench-runner:local"}
+
+        build_command = self.runner.worker_image_build_command(
+            config,
+            tracing_enabled=False,
+        )
+        probe_command = self.runner.worker_image_probe_command(
+            config["PINCHBENCH_DOCKER_IMAGE"],
+            tracing_enabled=False,
+        )
+
+        self.assertIn("TRACE_TO_OPIK=false", build_command)
+        self.assertIn("OPENCLAW_BASE_IMAGE=openclaw:local", build_command)
+        self.assertIn("pinchbench-trace-to-opik", probe_command[-1])
+        self.assertIn("test ! -e /opt/opik-venv", probe_command[-1])
+        self.assertIn("test ! -e /opt/openclaw-plugins/openclaw-opik-tracer", probe_command[-1])
+
+    def test_trace_on_image_path_keeps_opik_base_and_probe(self):
+        config = {"PINCHBENCH_DOCKER_IMAGE": "pinchbench-runner:local"}
+
+        build_command = self.runner.worker_image_build_command(
+            config,
+            tracing_enabled=True,
+        )
+        probe_command = self.runner.worker_image_probe_command(
+            config["PINCHBENCH_DOCKER_IMAGE"],
+            tracing_enabled=True,
+        )
+
+        self.assertIn("TRACE_TO_OPIK=true", build_command)
+        self.assertIn("OPENCLAW_BASE_IMAGE=openclaw:local-opik", build_command)
+        self.assertIn("pinchbench-trace-to-opik", probe_command[-1])
+        self.assertIn("opik-venv", probe_command[-1])
+        self.assertIn("openclaw-opik-tracer", probe_command[-1])
 
     def test_classify_web_search_disabled_timeout_as_skipped(self):
         merged = {

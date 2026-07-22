@@ -70,6 +70,11 @@ def _build_arg_parser(defaults: dict[str, str]) -> argparse.ArgumentParser:
 
 # ── Config resolution ─────────────────────────────────────────────────────────
 
+def trace_to_opik_enabled(value: str | None) -> bool:
+    """Return whether fleet-wide tracing is enabled."""
+    return (value or "true") not in {"false", "0"}
+
+
 def resolve_config(env: dict[str, str], argv: list[str]) -> dict[str, Any]:
     """Resolve runtime configuration from env + CLI args. Pure-ish: only reads env/argv."""
     home = env.get("HOME", str(Path.home()))
@@ -104,6 +109,7 @@ def resolve_config(env: dict[str, str], argv: list[str]) -> dict[str, Any]:
         "COUNT": env.get("COUNT", "2"),
         "BASE_URL": env.get("BASE_URL", ""),
         "API_KEY": env.get("API_KEY", ""),
+        "TRACE_TO_OPIK": env.get("TRACE_TO_OPIK", "true"),
         "OPIK_PLUGIN": env.get("OPIK_PLUGIN", "disabled"),
         "OPIK_URL": env.get("OPIK_URL", ""),
         "OPIK_API_KEY": env.get("OPIK_API_KEY", ""),
@@ -131,6 +137,11 @@ def resolve_config(env: dict[str, str], argv: list[str]) -> dict[str, Any]:
     cfg["PORT_STEP"] = int(cfg["PORT_STEP"])
     cfg["OPENCLAW_UID"] = int(cfg["OPENCLAW_UID"])
     cfg["OPENCLAW_GID"] = int(cfg["OPENCLAW_GID"])
+
+    # TRACE_TO_OPIK is the fleet-wide kill switch. A stale subsystem-specific
+    # OPIK_PLUGIN=enabled setting must not turn tracing back on.
+    if not trace_to_opik_enabled(cfg["TRACE_TO_OPIK"]):
+        cfg["OPIK_PLUGIN"] = "disabled"
 
     if cfg["DOCKER_COMPOSE_READ_ONLY"] not in ("true", "false"):
         raise _ParserError("--docker_compose_read_only must be 'true' or 'false'.")

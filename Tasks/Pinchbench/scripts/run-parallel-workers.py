@@ -30,6 +30,7 @@ OPENCLAW_CONTAINER_WORKSPACE_DIR = "/home/node/workspace"
 OPENCLAW_CONTAINER_CONFIG_PATH = f"{OPENCLAW_CONTAINER_STATE_DIR}/openclaw.json"
 PINCHBENCH_OPIK_CONTAINER_STATE_DIR = "/home/node/pinchbench-opik-state"
 OPIK_TRACER_CONTAINER_DIR = "/opt/openclaw-plugins/openclaw-opik-tracer"
+PINCHBENCH_TRACE_MODE_FILE = "/opt/pinchbench-trace-to-opik"
 
 
 def load_env_file(path: Path) -> dict[str, str]:
@@ -72,6 +73,11 @@ def config_bool(value: str | None, default: bool) -> bool:
     if value is None or not value.strip():
         return default
     return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def trace_to_opik_enabled(value: str | None) -> bool:
+    """Match the fleet-wide trace switch used by the Harbor/OpenClaw runners."""
+    return (value or "true") not in {"false", "0"}
 
 
 def positive_int(value: str) -> int:
@@ -123,6 +129,7 @@ def load_runner_config() -> dict[str, str]:
         "MODEL": shared_model(),
         "BASE_URL": shared("BASE_URL"),
         "API_KEY": shared("API_KEY"),
+        "TRACE_TO_OPIK": shared("TRACE_TO_OPIK", "true"),
         "PINCHBENCH_MODEL_PROVIDER": "auto",
         "PINCHBENCH_TIMEOUT_MULTIPLIER": "1.0",
         "JUDGE_MODEL": "",
@@ -148,6 +155,10 @@ def load_runner_config() -> dict[str, str]:
         "PIP_TRUSTED_HOST": shared("PIP_TRUSTED_HOST"),
     }
     config.update(runner_env)
+    # This is a fleet-wide switch, not a PinchBench-specific setting. Keep it
+    # on the shared config precedence chain even if an old runner file happens
+    # to contain a conflicting key; the caller environment still wins below.
+    config["TRACE_TO_OPIK"] = shared("TRACE_TO_OPIK", "true")
     for key in config:
         if key in os.environ:
             config[key] = os.environ[key]
@@ -157,6 +168,59 @@ def load_runner_config() -> dict[str, str]:
         config[key] = expand_path(config[key])
     config["PINCHBENCH_REPO_URL"] = expand_repo_url(config["PINCHBENCH_REPO_URL"], REPO_ROOT)
     return config
+
+
+def gateway_config_enables_opik_plugin(config_path: Path) -> bool:
+    """Return whether a generated OpenClaw config can load the Opik plugin."""
+    try:
+        payload = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        sys.exit(f"Error: cannot inspect OpenClaw gateway config {config_path}: {exc}")
+
+    plugins = payload.get("plugins", {}) if isinstance(payload, dict) else {}
+    if not isinstance(plugins, dict):
+        return False
+
+    allow = plugins.get("allow", [])
+    if isinstance(allow, list) and "openclaw-opik-tracer" in allow:
+        return True
+
+    entries = plugins.get("entries", {})
+    if isinstance(entries, dict):
+        entry = entries.get("openclaw-opik-tracer")
+        if isinstance(entry, dict) and entry.get("enabled") is True:
+            return True
+
+    load = plugins.get("load", {})
+    paths = load.get("paths", []) if isinstance(load, dict) else []
+    return isinstance(paths, list) and any(
+        isinstance(path, str) and "openclaw-opik-tracer" in path
+        for path in paths
+    )
+
+
+def validate_trace_off_gateway_configs(config_base: Path, instances: int) -> None:
+    """Fail before launching workers if an existing gateway can still trace."""
+    stale_instances: list[int] = []
+    for instance_index in range(1, instances + 1):
+        config_path = config_base / str(instance_index) / "openclaw.json"
+        if config_path.is_file() and gateway_config_enables_opik_plugin(config_path):
+            stale_instances.append(instance_index)
+
+    if not stale_instances:
+        return
+
+    instance_label = (
+        f"instance {stale_instances[0]}"
+        if len(stale_instances) == 1
+        else "instances " + ",".join(str(index) for index in stale_instances)
+    )
+    sys.exit(
+        "Error: TRACE_TO_OPIK=false, but the OpenClaw gateway config for "
+        f"{instance_label} still enables openclaw-opik-tracer. "
+        f"Rerun TRACE_TO_OPIK=false ./Agents/Openclaw/scripts/setup.sh {instances}, "
+        "then restart the OpenClaw fleet before running PinchBench."
+    )
 
 
 def build_benchmark_command(
@@ -218,7 +282,7 @@ def build_worker_docker_command(
     workspace_dir: Path,
     plugin_cache_dir: Path | None,
     results_dir: Path,
-    opik_state_dir: Path,
+    opik_state_dir: Path | None,
     bench_cmd: str,
     container_env: dict[str, str] | None = None,
 ) -> list[str]:
@@ -241,9 +305,10 @@ def build_worker_docker_command(
         "-v", f"{config_dir}:{OPENCLAW_CONTAINER_STATE_DIR}",
         "-v", f"{workspace_dir}:{OPENCLAW_CONTAINER_WORKSPACE_DIR}",
         "-v", f"{results_dir}:/results",
-        "-v", f"{opik_state_dir}:{PINCHBENCH_OPIK_CONTAINER_STATE_DIR}",
-        "-v", f"{uv_cache_dir}:/home/node/.cache/uv",
     ]
+    if opik_state_dir is not None:
+        command.extend(["-v", f"{opik_state_dir}:{PINCHBENCH_OPIK_CONTAINER_STATE_DIR}"])
+    command.extend(["-v", f"{uv_cache_dir}:/home/node/.cache/uv"])
     if plugin_cache_dir is not None and plugin_cache_dir.is_dir():
         command.extend(["-v", f"{plugin_cache_dir}:/opt/plugin-cache:ro"])
     for key, value in (container_env or {}).items():
@@ -253,25 +318,53 @@ def build_worker_docker_command(
     return command
 
 
-def wrap_worker_command(*, run_as_user: str, bench_cmd: str) -> str:
+def wrap_worker_command(
+    *, run_as_user: str, bench_cmd: str, tracing_enabled: bool = True
+) -> str:
     worker_cmd = "umask 000\n" + bench_cmd
+    opik_dirs = (
+        f" {OPENCLAW_CONTAINER_STATE_DIR}/opik-state {PINCHBENCH_OPIK_CONTAINER_STATE_DIR}"
+        if tracing_enabled
+        else ""
+    )
+    opik_setup = ""
+    opik_paths = ""
+    opik_drain = ""
+    if tracing_enabled:
+        opik_setup = (
+            "if [ \"${PINCHBENCH_RESET_GATEWAY_OPIK_STATE:-true}\" = \"true\" ]; then\n"
+            f"  rm -f {OPENCLAW_CONTAINER_STATE_DIR}/opik-state/opik_tracer_state.json "
+            f"{OPENCLAW_CONTAINER_STATE_DIR}/opik-state/opik_tracer_state.lock\n"
+            "fi\n"
+            "[ -L /home/node/.openclaw/state ] || rm -rf /home/node/.openclaw/state\n"
+            f"ln -sfn {PINCHBENCH_OPIK_CONTAINER_STATE_DIR} /home/node/.openclaw/state\n"
+        )
+        opik_paths = (
+            f" {OPENCLAW_CONTAINER_STATE_DIR}/opik-state {PINCHBENCH_OPIK_CONTAINER_STATE_DIR}"
+        )
+        opik_drain = (
+            "for _ in $(seq 1 \"${PINCHBENCH_OPIK_DRAIN_SECONDS:-60}\"); do\n"
+            "  if ps -eo args | grep -F "
+            "'/opt/openclaw-plugins/openclaw-opik-tracer/tracer/openclaw_opik_tracer.py' "
+            "| grep -v grep >/dev/null; then\n"
+            "    sleep 1\n"
+            "  else\n"
+            "    break\n"
+            "  fi\n"
+            "done\n"
+            "echo \"pinchbench opik drain complete\"\n"
+        )
     return (
         "set -euo pipefail\n"
         "umask 000\n"
         "install -m 0755 /root/.local/bin/uv /tmp/uv\n"
-        f"mkdir -p /home/node/.openclaw {OPENCLAW_CONTAINER_STATE_DIR}/agents "
-        f"{OPENCLAW_CONTAINER_STATE_DIR}/opik-state {PINCHBENCH_OPIK_CONTAINER_STATE_DIR}\n"
-        "if [ \"${PINCHBENCH_RESET_GATEWAY_OPIK_STATE:-true}\" = \"true\" ]; then\n"
-        f"  rm -f {OPENCLAW_CONTAINER_STATE_DIR}/opik-state/opik_tracer_state.json "
-        f"{OPENCLAW_CONTAINER_STATE_DIR}/opik-state/opik_tracer_state.lock\n"
-        "fi\n"
+        f"mkdir -p /home/node/.openclaw {OPENCLAW_CONTAINER_STATE_DIR}/agents{opik_dirs}\n"
+        f"{opik_setup}"
         f"ln -sfn {OPENCLAW_CONTAINER_STATE_DIR}/agents /home/node/.openclaw/agents\n"
-        "[ -L /home/node/.openclaw/state ] || rm -rf /home/node/.openclaw/state\n"
-        f"ln -sfn {PINCHBENCH_OPIK_CONTAINER_STATE_DIR} /home/node/.openclaw/state\n"
         "touch /runner/benchmark.log\n"
         f"chown {shlex.quote(run_as_user)}:{shlex.quote(run_as_user)} /runner/benchmark.log\n"
         f"for path in /results /home/node/.cache/uv {OPENCLAW_CONTAINER_STATE_DIR}/agents "
-        f"{OPENCLAW_CONTAINER_STATE_DIR}/opik-state {PINCHBENCH_OPIK_CONTAINER_STATE_DIR} "
+        f"{opik_paths} "
         f"{OPENCLAW_CONTAINER_WORKSPACE_DIR} {OPENCLAW_CONTAINER_STATE_DIR}/identity "
         f"{OPENCLAW_CONTAINER_CONFIG_PATH} "
         f"{OPENCLAW_CONTAINER_CONFIG_PATH}.bak; do\n"
@@ -281,14 +374,7 @@ def wrap_worker_command(*, run_as_user: str, bench_cmd: str) -> str:
         "status=0\n"
         f"su {shlex.quote(run_as_user)} -s /bin/bash -c {shlex.quote(worker_cmd)} || status=$?\n"
         "echo \"pinchbench worker command exit status=$status\"\n"
-        "for _ in $(seq 1 \"${PINCHBENCH_OPIK_DRAIN_SECONDS:-60}\"); do\n"
-        "  if ps -eo args | grep -F '/opt/openclaw-plugins/openclaw-opik-tracer/tracer/openclaw_opik_tracer.py' | grep -v grep >/dev/null; then\n"
-        "    sleep 1\n"
-        "  else\n"
-        "    break\n"
-        "  fi\n"
-        "done\n"
-        "echo \"pinchbench opik drain complete\"\n"
+        f"{opik_drain}"
         "[ \"$status\" -eq 0 ]"
     )
 
@@ -305,6 +391,7 @@ def run_worker_phase(
     run_dir: Path,
 ) -> None:
     run_as_user = config["OPENCLAW_CONTAINER_USER"]
+    tracing_enabled = trace_to_opik_enabled(config.get("TRACE_TO_OPIK"))
     procs: list[subprocess.Popen] = []
     for spec in worker_specs:
         log_file = Path(spec["worker_dir"]) / f"{phase_name}.log"
@@ -329,7 +416,11 @@ def run_worker_phase(
                 else None
             ),
             results_dir=Path(spec["results_dir"]),
-            opik_state_dir=Path(spec["opik_state_dir"]),
+            opik_state_dir=(
+                Path(spec["opik_state_dir"])
+                if spec.get("opik_state_dir") is not None
+                else None
+            ),
             container_env={
                 key: config.get(key, "")
                 for key in (
@@ -337,11 +428,13 @@ def run_worker_phase(
                     "PIP_INDEX_URL",
                     "PIP_EXTRA_INDEX_URL",
                     "PIP_TRUSTED_HOST",
+                    "TRACE_TO_OPIK",
                 )
             },
             bench_cmd=wrap_worker_command(
                 run_as_user=run_as_user,
                 bench_cmd=build_command(spec),
+                tracing_enabled=tracing_enabled,
             ),
         )
         with open(log_file, "w", encoding="utf-8") as log_fh:
@@ -904,10 +997,54 @@ def write_iterations_summary_files(run_root_dir: Path, iteration_summaries: list
     return iterations_summary_json, iterations_summary_md
 
 
+def worker_image_probe_command(image: str, *, tracing_enabled: bool) -> list[str]:
+    expected_mode = "true" if tracing_enabled else "false"
+    checks = (
+        "command -v uv >/dev/null 2>&1 && uv --version >/dev/null 2>&1"
+        f" && test \"$(cat {PINCHBENCH_TRACE_MODE_FILE} 2>/dev/null)\" = {expected_mode}"
+    )
+    if tracing_enabled:
+        checks += (
+            " && test -x /opt/opik-venv/bin/python"
+            " && /opt/opik-venv/bin/python -c 'import opik, uuid6'"
+            f" && test -r {OPIK_TRACER_CONTAINER_DIR}/dist/index.js"
+            f" && test -r {OPIK_TRACER_CONTAINER_DIR}/tracer/openclaw_opik_tracer.py"
+        )
+    else:
+        checks += (
+            " && test ! -e /opt/opik-venv"
+            f" && test ! -e {OPIK_TRACER_CONTAINER_DIR}"
+        )
+    return [
+        "docker", "run", "--rm",
+        "--entrypoint", "/bin/bash",
+        image,
+        "-lc",
+        checks,
+    ]
+
+
+def worker_image_build_command(config: dict[str, str], *, tracing_enabled: bool) -> list[str]:
+    build_cmd = [
+        "docker", "build", "-f", str(BENCH_DIR / "Dockerfile"),
+        "-t", config["PINCHBENCH_DOCKER_IMAGE"],
+        "--build-arg", f"TRACE_TO_OPIK={'true' if tracing_enabled else 'false'}",
+        "--build-arg",
+        f"OPENCLAW_BASE_IMAGE={'openclaw:local-opik' if tracing_enabled else 'openclaw:local'}",
+    ]
+    for key in ("PIP_INDEX_URL", "PIP_EXTRA_INDEX_URL", "PIP_TRUSTED_HOST"):
+        value = config.get(key, "")
+        if value:
+            build_cmd.extend(["--build-arg", f"{key}={value}"])
+    build_cmd.append(str(REPO_ROOT))
+    return build_cmd
+
+
 def main() -> None:
     config = load_runner_config()
     args = parse_args(config)
     validate(args, config)
+    tracing_enabled = trace_to_opik_enabled(config.get("TRACE_TO_OPIK"))
 
     pinchbench_dir = Path(config["PINCHBENCH_DIR"])
     patches_dir = BENCH_DIR / "patches"
@@ -916,25 +1053,10 @@ def main() -> None:
     workspace_base = Path(config["WORKSPACE_BASE"])
     Path(config["PINCHBENCH_UV_CACHE_DIR"]).mkdir(parents=True, exist_ok=True)
 
-    prepare_checkout(pinchbench_dir, repo_url, config["PINCHBENCH_REF"], patches_dir)
+    if not tracing_enabled:
+        validate_trace_off_gateway_configs(config_base, args.instances)
 
-    def image_has_required_tools(image: str) -> bool:
-        probe = subprocess.run(
-            [
-                "docker", "run", "--rm",
-                "--entrypoint", "/bin/bash",
-                image,
-                "-lc",
-                "command -v uv >/dev/null 2>&1 && "
-                "uv --version >/dev/null 2>&1 && "
-                "test -x /opt/opik-venv/bin/python && "
-                "/opt/opik-venv/bin/python -c 'import opik, uuid6' && "
-                f"test -r {OPIK_TRACER_CONTAINER_DIR}/dist/index.js && "
-                f"test -r {OPIK_TRACER_CONTAINER_DIR}/tracer/openclaw_opik_tracer.py",
-            ],
-            capture_output=True,
-        )
-        return probe.returncode == 0
+    prepare_checkout(pinchbench_dir, repo_url, config["PINCHBENCH_REF"], patches_dir)
 
     image_missing = subprocess.run(
         ["docker", "image", "inspect", config["PINCHBENCH_DOCKER_IMAGE"]],
@@ -943,20 +1065,17 @@ def main() -> None:
     force_build = config_bool(config.get("PINCHBENCH_FORCE_BUILD"), False)
     image_unusable = False
     if not image_missing and not force_build:
-        image_unusable = not image_has_required_tools(config["PINCHBENCH_DOCKER_IMAGE"])
+        image_unusable = subprocess.run(
+            worker_image_probe_command(
+                config["PINCHBENCH_DOCKER_IMAGE"],
+                tracing_enabled=tracing_enabled,
+            ),
+            capture_output=True,
+        ).returncode != 0
 
     if force_build or image_missing or image_unusable:
-        build_cmd = [
-            "docker", "build", "-f", str(BENCH_DIR / "Dockerfile"),
-            "-t", config["PINCHBENCH_DOCKER_IMAGE"],
-        ]
-        for key in ("PIP_INDEX_URL", "PIP_EXTRA_INDEX_URL", "PIP_TRUSTED_HOST"):
-            value = config.get(key, "")
-            if value:
-                build_cmd.extend(["--build-arg", f"{key}={value}"])
-        build_cmd.append(str(REPO_ROOT))
         subprocess.run(
-            build_cmd,
+            worker_image_build_command(config, tracing_enabled=tracing_enabled),
             check=True,
         )
 
@@ -1012,11 +1131,12 @@ def main() -> None:
             workspace_dir = workspace_base / str(i)
             results_dir = worker_dir / "results"
             home_dir = worker_dir / "home"
-            opik_state_dir = worker_dir / "opik-state"
+            opik_state_dir = worker_dir / "opik-state" if tracing_enabled else None
             worker_dir.mkdir(parents=True, exist_ok=True)
             results_dir.mkdir(parents=True, exist_ok=True)
             home_dir.mkdir(parents=True, exist_ok=True)
-            opik_state_dir.mkdir(parents=True, exist_ok=True)
+            if opik_state_dir is not None:
+                opik_state_dir.mkdir(parents=True, exist_ok=True)
 
             if not config_dir.is_dir() or not workspace_dir.is_dir():
                 sys.exit(

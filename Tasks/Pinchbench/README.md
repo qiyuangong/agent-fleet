@@ -63,13 +63,14 @@ flowchart LR
 BASE_URL="https://your-openai-compatible-endpoint/v1" \
 API_KEY="$PROVIDER_API_KEY" \
 MODEL="your-model-id" \
+TRACE_TO_OPIK=false \
 ./Agents/Openclaw/scripts/setup.sh 3
 
 # To enable tracing OpenClaw to Opik, build the opik-enabled image first
 # and pass the Opik config at setup (OPIK_URL and OPIK_PROJECT_NAME required):
-#   OPIK_PLUGIN=enabled ./Agents/Openclaw/scripts/build-openclaw-image.sh
+#   TRACE_TO_OPIK=true OPIK_PLUGIN=enabled ./Agents/Openclaw/scripts/build-openclaw-image.sh
 #
-#   OPIK_PLUGIN=enabled \
+#   TRACE_TO_OPIK=true OPIK_PLUGIN=enabled \
 #   OPIK_URL="https://opik.example.com/api/" \
 #   OPIK_PROJECT_NAME="my-project" \
 #   BASE_URL="https://your-openai-compatible-endpoint/v1" \
@@ -86,13 +87,21 @@ docker compose -f Agents/Openclaw/docker-compose.yml up -d
 $EDITOR Tasks/Pinchbench/config/pinchbench.env
 
 # 3. Run PinchBench in parallel (one worker per gateway)
-API_KEY="$PROVIDER_API_KEY" ./Tasks/Pinchbench/scripts/run-parallel-workers.py --instances 3
+TRACE_TO_OPIK=false API_KEY="$PROVIDER_API_KEY" \
+  ./Tasks/Pinchbench/scripts/run-parallel-workers.py --instances 3
 
 # Run multiple iterations and generate per-iteration summaries
-API_KEY="$PROVIDER_API_KEY" ./Tasks/Pinchbench/scripts/run-parallel-workers.py --instances 3 -n 5
+TRACE_TO_OPIK=false API_KEY="$PROVIDER_API_KEY" \
+  ./Tasks/Pinchbench/scripts/run-parallel-workers.py --instances 3 -n 5
 ```
 
-The default flow works with the local OpenAI-compatible provider that your OpenClaw fleet is configured to use.
+The Quick Start explicitly disables tracing, so it needs only `openclaw:local`
+and no Opik endpoint or plugin checkout.
+PinchBench follows the repo-wide `TRACE_TO_OPIK` setting. With
+`TRACE_TO_OPIK=false`, workers build from `openclaw:local` and skip Opik runtime
+checks, tracer state mounts, and drain waits. The runner also refuses to start
+if an existing generated gateway config still enables the Opik plugin; rerun
+OpenClaw setup with tracing disabled and restart the fleet in that case.
 Benchmark-specific defaults live in [`Tasks/Pinchbench/config/pinchbench.env`](./config/pinchbench.env).
 The PinchBench repo is cloned automatically to `/tmp/pinchbench-skill` on first run. Override `PINCHBENCH_DIR` in `pinchbench.env` if you want a different checkout path.
 If you point `PINCHBENCH_DIR` at an existing checkout, it must be clean; the runner will refuse to reuse a checkout with local edits or untracked files.
@@ -103,7 +112,8 @@ The runner checks out pinned upstream commit `f3f1cb560c252541cef6a106c05ba4f2e8
 Start with a single task on one worker to verify the setup:
 
 ```bash
-API_KEY="$PROVIDER_API_KEY" ./Tasks/Pinchbench/scripts/run-parallel-workers.py \
+TRACE_TO_OPIK=false API_KEY="$PROVIDER_API_KEY" \
+  ./Tasks/Pinchbench/scripts/run-parallel-workers.py \
   --instances 1 \
   --suite task_sanity
 ```
@@ -118,6 +128,7 @@ Use this example when the OpenClaw gateways should call a local OpenAI-compatibl
 BASE_URL="http://host.docker.internal:8000/v1" \
 API_KEY="dummy" \
 MODEL="local-model-id" \
+TRACE_TO_OPIK=false \
 ./Agents/Openclaw/scripts/setup.sh 1
 
 docker compose -f Agents/Openclaw/docker-compose.yml up -d
@@ -126,7 +137,8 @@ docker compose -f Agents/Openclaw/docker-compose.yml up -d
 # MODEL=local-model-id
 # PINCHBENCH_MODEL_PROVIDER=vllm
 
-./Tasks/Pinchbench/scripts/run-parallel-workers.py --instances 1 --suite task_sanity
+TRACE_TO_OPIK=false \
+  ./Tasks/Pinchbench/scripts/run-parallel-workers.py --instances 1 --suite task_sanity
 ```
 
 ## Files
@@ -182,6 +194,7 @@ The runner reads defaults from [`config/pinchbench.env`](./config/pinchbench.env
 | `JUDGE_MODEL` | _(benchmark.py default)_ | Judge model override |
 | `API_KEY` | _(none)_ | Generic provider API key; the runner maps it to PinchBench's expected env var when needed |
 | `OPENROUTER_API_KEY` | _(none)_ | Compatibility env var used by upstream PinchBench; usually you can just set `API_KEY` |
+| `TRACE_TO_OPIK` | `true` | Shared fleet tracing switch; set `false` for the Opik-free worker and gateway path |
 | `PINCHBENCH_DIR` | `/tmp/pinchbench-skill` | PinchBench checkout path |
 | `PINCHBENCH_REF` | `f3f1cb560c252541cef6a106c05ba4f2e8068be0` | Upstream PinchBench git ref pinned by this runner |
 | `PINCHBENCH_OUTPUT_DIR` | `Tasks/Pinchbench/.pinchbench-results-docker` | Output root |

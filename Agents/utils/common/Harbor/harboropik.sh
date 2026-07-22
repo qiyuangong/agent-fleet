@@ -97,10 +97,28 @@ print("[ONLINE_ENV] " + json.dumps({
 PY
 }
 
+# harbor_trace_to_opik_enabled comes from env.sh so the worker shares it.
+configure_trace_disabled_runtime() {
+  if harbor_trace_to_opik_enabled; then
+    return 0
+  fi
+
+  # Both launcher paths still use the Opik tool environment because it also
+  # contains Harbor. Disable the SDK itself so the host-side Harbor decorator
+  # cannot enqueue writes after the readiness checks have been skipped. Keep
+  # connection values available to this shell, but do not let Harbor/Compose
+  # inherit them from the parent environment.
+  OPIK_TRACK_DISABLE=true
+  export OPIK_TRACK_DISABLE
+  export -n OPIK_URL OPIK_URL_OVERRIDE OPIK_BASE OPIK_MODE \
+    OPIK_PROJECT_NAME OPIK_API_KEY OPIK_WORKSPACE
+}
+
 normalize_opik_url_override() {
   local normalized="${OPIK_URL_OVERRIDE%/}"
   if [[ -z "$normalized" ]]; then
     echo "[ERROR] OPIK_URL_OVERRIDE/OPIK_URL is empty; set it to an Opik API URL such as http://host:5173/api" >&2
+    echo "[ERROR] or set TRACE_TO_OPIK=false to run the benchmark without Opik tracing" >&2
     exit 1
   fi
   if [[ "$normalized" != */api ]]; then
@@ -167,19 +185,23 @@ ensure_trace_plugin_source_if_needed() {
   if [[ "$TB_DRY_RUN" == "1" ]]; then
     return 0
   fi
-  local trace_enabled="${TRACE_TO_OPIK:-${TB_TRACE_TO_OPIK:-}}"
+  local trace_enabled="${TRACE_TO_OPIK:-}"
   local -a required=()
   if [[ "$AGENT" == "opencode" ]]; then
-    local oc_trace="${TB_TRACE_TO_OPIK:-${TRACE_TO_OPIK:-}}"
-    if [[ "$oc_trace" == "true" || "$oc_trace" == "1" ]]; then
+    if [[ "$trace_enabled" == "true" || "$trace_enabled" == "1" ]]; then
       required=("$TRACE_PLUGIN_OPENCODE_PLUGIN_SOURCE" "$TRACE_PLUGIN_OPENCODE_HOOK_SOURCE")
     fi
-  elif [[ "$trace_enabled" == "true" || "$trace_enabled" == "1" || "$TB_CC_OPIK_ENABLE_HOOK" == "1" ]]; then
+  elif harbor_trace_to_opik_enabled &&
+    [[ "$trace_enabled" == "true" || "$trace_enabled" == "1" || "$TB_CC_OPIK_ENABLE_HOOK" == "1" ]]; then
+    # With tracing off the realtime hook is forced off at command
+    # construction, so its source is not required either.
     required=("$TRACE_PLUGIN_CLAUDE_HOOK_SOURCE")
   fi
 
   local path
-  for path in "${required[@]}"; do
+  # ${arr[@]+...} keeps the expansion valid for an empty array under
+  # `set -u` on bash < 4.4 (macOS 3.2); with tracing off nothing is required.
+  for path in ${required[@]+"${required[@]}"}; do
     if [[ ! -f "$path" ]]; then
       echo "[ERROR] trace plugin source missing: $path" >&2
       echo "[ERROR] run 'git submodule update --init --recursive' from $REPO_ROOT, or set TRACE_PLUGIN_SOURCE_DIR explicitly." >&2
@@ -487,12 +509,11 @@ run_tb() {
   fi
   mkdir -p "$out_dir"
 
-  export OPIK_URL_OVERRIDE
-  export OPIK_WORKSPACE
-  export OPIK_API_KEY
-  export OPIK_PROJECT_NAME
-
-  if [[ "$TB_DRY_RUN" != "1" ]]; then
+  if [[ "$TB_DRY_RUN" == "1" ]]; then
+    echo "[INFO] TB_DRY_RUN=1, skip Opik project preflight check"
+  elif ! harbor_trace_to_opik_enabled; then
+    echo "[INFO] TRACE_TO_OPIK=false, skip Opik project preflight check"
+  else
     local _projects_status
     _projects_status="$(
       curl -sS -o /dev/null -w "%{http_code}" \
@@ -509,8 +530,6 @@ run_tb() {
         exit 1
         ;;
     esac
-  else
-    echo "[INFO] TB_DRY_RUN=1, skip Opik project preflight check"
   fi
 
   local normalized_llm_kwargs
@@ -589,12 +608,7 @@ PY
     --ae "CLAUDE_CODE_EFFORT_LEVEL=$TB_CLAUDE_CODE_EFFORT_LEVEL"
     --ae "CLAUDE_CODE_MAX_OUTPUT_TOKENS=$TB_CLAUDE_CODE_MAX_OUTPUT_TOKENS"
     --ae "CLAUDE_CODE_DISABLE_AUTOUPDATER=$TB_CLAUDE_CODE_DISABLE_AUTOUPDATER"
-    --ae "TRACE_TO_OPIK=$TB_TRACE_TO_OPIK"
-    --ae "OPIK_URL_OVERRIDE=$OPIK_URL_OVERRIDE"
-    --ae "OPIK_URL=$OPIK_URL_OVERRIDE"
-    --ae "OPIK_PROJECT_NAME=$OPIK_PROJECT_NAME"
-    --ae "OPIK_API_KEY=$OPIK_API_KEY"
-    --ae "OPIK_WORKSPACE=$OPIK_WORKSPACE"
+    --ae "TRACE_TO_OPIK=$TRACE_TO_OPIK"
     --ae "CC_OPIK_DEBUG=$TB_CC_OPIK_DEBUG"
     --ae "CC_OPIK_INSTALL_DEPS=$TB_CC_OPIK_INSTALL_DEPS"
     --ae "CC_OPIK_HOOK_MOUNT_PATH=$TB_CC_HOOK_MOUNT_PATH"
@@ -614,6 +628,18 @@ PY
     --timeout-multiplier "$TB_TIMEOUT_MULTIPLIER"
     --agent-setup-timeout-multiplier "$TB_AGENT_SETUP_TIMEOUT_MULTIPLIER"
   )
+  # Task code can read its own environment. With tracing disabled nothing in
+  # the container consumes the Opik connection fields, so do not expose the
+  # endpoint or credentials there.
+  if harbor_trace_to_opik_enabled; then
+    cmd+=(
+      --ae "OPIK_URL_OVERRIDE=$OPIK_URL_OVERRIDE"
+      --ae "OPIK_URL=$OPIK_URL_OVERRIDE"
+      --ae "OPIK_PROJECT_NAME=$OPIK_PROJECT_NAME"
+      --ae "OPIK_API_KEY=$OPIK_API_KEY"
+      --ae "OPIK_WORKSPACE=$OPIK_WORKSPACE"
+    )
+  fi
   if harbor_uses_registry_dataset; then
     cmd+=( --dataset "$(harbor_registry_dataset_name)" )
   else
@@ -667,7 +693,10 @@ PY
   cmd+=( --ae "NO_PROXY=$no_proxy_value" --ae "no_proxy=$no_proxy_value" )
 
   local hook_mount_enabled=0
-  if [[ "$TB_CC_OPIK_ENABLE_HOOK" == "1" ]]; then
+  # The hook has no Opik server to talk to when tracing is off, so an
+  # exported TB_CC_OPIK_ENABLE_HOOK=1 (e.g. persisted by setup.sh) must not
+  # re-enable it.
+  if [[ "$TB_CC_OPIK_ENABLE_HOOK" == "1" ]] && harbor_trace_to_opik_enabled; then
     if [[ -f "$TB_CC_HOOK_SOURCE" ]]; then
       hook_mount_enabled=1
       cmd+=( --ae "CC_OPIK_ENABLE_HOOK=true" )
@@ -698,12 +727,17 @@ uv_dst = sys.argv[9]
 mounts = []
 def bind_mount(src, dst):
     return {"type": "bind", "source": src, "target": dst, "read_only": True}
+# Only the hook source follows the hook switch. The Claude package and
+# wheel/runtime caches serve the offline agent install and must stay
+# mounted with tracing disabled, for benchmark and rollout workers alike.
+# NOTE: no single quotes in this heredoc; bash 3.2 mis-parses them inside
+# command substitution.
 if hook_enabled:
     mounts.append(bind_mount(src, dst))
-    if claude_src and os.path.exists(claude_src):
-        mounts.append(bind_mount(claude_src, claude_dst))
-    if wheel_src and os.path.exists(wheel_src):
-        mounts.append(bind_mount(wheel_src, wheel_dst))
+if claude_src and os.path.exists(claude_src):
+    mounts.append(bind_mount(claude_src, claude_dst))
+if wheel_src and os.path.exists(wheel_src):
+    mounts.append(bind_mount(wheel_src, wheel_dst))
 if (
     uv_src
     and os.path.isdir(uv_src)
@@ -861,7 +895,9 @@ run_opencode_task() {
   HARBOR_OPIK_PYTHON="${HARBOR_OPIK_PYTHON:-$HOME/.local/share/uv/tools/opik/bin/python}"
 
   harbor_apply_effective_wheel_source
-  normalize_opik_url_override
+  if harbor_trace_to_opik_enabled; then
+    normalize_opik_url_override
+  fi
 
   if [[ "$TB_DRY_RUN" != "1" && ! -x "$HARBOR_OPIK_BIN" ]]; then
     harbor_prepare_runner_cli
@@ -872,7 +908,7 @@ run_opencode_task() {
     exit 1
   fi
 
-  if [[ "$TB_DRY_RUN" != "1" && "$OPIK_MODE" == "remote" ]]; then
+  if [[ "$TB_DRY_RUN" != "1" && "$OPIK_MODE" == "remote" ]] && harbor_trace_to_opik_enabled; then
     verify_opik_reachable
     verify_opik_ingestion_route
   fi
@@ -885,8 +921,6 @@ run_opencode_task() {
     printf '%s\n' "$out_dir" > "$HARBOR_JOB_DIR_FILE"
   fi
   mkdir -p "$out_dir"
-
-  export OPIK_URL_OVERRIDE OPIK_WORKSPACE OPIK_API_KEY OPIK_PROJECT_NAME
 
   local effective_tb_task_id include_task
   effective_tb_task_id="${TB_TASK_ID:-}"
@@ -929,12 +963,7 @@ PY
       --ak "version=$OPENCODE_VERSION"
       --agent-import-path opik_opencode_harbor:OpikOpenCodeHarbor
       -m "$TB_MODEL"
-      --ae "OPIK_URL_OVERRIDE=$OPIK_URL_OVERRIDE"
-      --ae "OPIK_URL=$OPIK_URL_OVERRIDE"
-      --ae "OPIK_PROJECT_NAME=$OPIK_PROJECT_NAME"
-      --ae "OPIK_API_KEY=$OPIK_API_KEY"
-      --ae "OPIK_WORKSPACE=$OPIK_WORKSPACE"
-      --ae "TRACE_TO_OPIK=$TB_TRACE_TO_OPIK"
+      --ae "TRACE_TO_OPIK=$TRACE_TO_OPIK"
       --ae "CC_OPIK_PY_WHEEL_DIR=$TB_CC_PY_WHEEL_DIR_MOUNT_PATH"
       --ae "TB_LOCAL_WHEEL_SERVER_URL=${TB_LOCAL_WHEEL_SERVER_URL:-}"
       --ae "OPENCODE_TGZ_PATH=$TB_CC_PY_WHEEL_DIR_MOUNT_PATH/$OPENCODE_TGZ_BASENAME"
@@ -951,6 +980,17 @@ PY
       --timeout-multiplier "$TB_TIMEOUT_MULTIPLIER"
       --agent-setup-timeout-multiplier "$TB_AGENT_SETUP_TIMEOUT_MULTIPLIER"
     )
+    # Same rule as the Claude builder: no Opik endpoint or credentials in
+    # trace-off task environments.
+    if harbor_trace_to_opik_enabled; then
+      cmd+=(
+        --ae "OPIK_URL_OVERRIDE=$OPIK_URL_OVERRIDE"
+        --ae "OPIK_URL=$OPIK_URL_OVERRIDE"
+        --ae "OPIK_PROJECT_NAME=$OPIK_PROJECT_NAME"
+        --ae "OPIK_API_KEY=$OPIK_API_KEY"
+        --ae "OPIK_WORKSPACE=$OPIK_WORKSPACE"
+      )
+    fi
     if harbor_uses_registry_dataset; then
       cmd+=( --dataset "$(harbor_registry_dataset_name)" )
     else
@@ -1093,10 +1133,13 @@ PY
 
 main() {
   harbor_validate_agent
+  configure_trace_disabled_runtime
   if harbor_agent_is_opencode; then
     need_cmd curl
     need_cmd python3
-    normalize_opik_url_override
+    if harbor_trace_to_opik_enabled; then
+      normalize_opik_url_override
+    fi
     ensure_trace_plugin_source_if_needed
     apply_min_test_defaults
 
@@ -1109,22 +1152,28 @@ main() {
     ensure_docker_daemon
     docker_hub_preflight_check
 
-    if [[ "$OPIK_MODE" != "local" && "$OPIK_MODE" != "remote" ]]; then
-      echo "[ERROR] OPIK_MODE must be local or remote, got: $OPIK_MODE" >&2
-      exit 1
-    fi
+    if ! harbor_trace_to_opik_enabled; then
+      echo "[INFO] TRACE_TO_OPIK=false, skip Opik readiness checks"
+    else
+      if [[ "$OPIK_MODE" != "local" && "$OPIK_MODE" != "remote" ]]; then
+        echo "[ERROR] OPIK_MODE must be local or remote, got: $OPIK_MODE" >&2
+        exit 1
+      fi
 
-    if [[ "$OPIK_MODE" == "local" ]]; then
-      ensure_opik_repo
+      if [[ "$OPIK_MODE" == "local" ]]; then
+        ensure_opik_repo
+      fi
     fi
     prepare_local_dataset_if_needed
-    if [[ "$OPIK_MODE" == "local" ]]; then
-      start_opik_local
-    elif [[ "$OPIK_BASE" == "http://localhost:5173" && "$OPIK_URL_OVERRIDE" == "http://localhost:5173/api" ]]; then
-      echo "[ERROR] OPIK_MODE=remote requires a real remote Opik endpoint." >&2
-      echo "[ERROR] please set OPIK_BASE (for example: https://your-opik-host)" >&2
-      echo "[ERROR] and optionally OPIK_URL_OVERRIDE (for example: https://your-opik-host/api)." >&2
-      exit 1
+    if harbor_trace_to_opik_enabled; then
+      if [[ "$OPIK_MODE" == "local" ]]; then
+        start_opik_local
+      elif [[ "$OPIK_BASE" == "http://localhost:5173" && "$OPIK_URL_OVERRIDE" == "http://localhost:5173/api" ]]; then
+        echo "[ERROR] OPIK_MODE=remote requires a real remote Opik endpoint." >&2
+        echo "[ERROR] please set OPIK_BASE (for example: https://your-opik-host)" >&2
+        echo "[ERROR] and optionally OPIK_URL_OVERRIDE (for example: https://your-opik-host/api)." >&2
+        exit 1
+      fi
     fi
 
     run_opencode_task
@@ -1136,7 +1185,9 @@ main() {
   need_cmd python3
   need_cmd uv
   ensure_docker_daemon
-  normalize_opik_url_override
+  if harbor_trace_to_opik_enabled; then
+    normalize_opik_url_override
+  fi
   ensure_trace_plugin_source_if_needed
 
   if [[ -z "$TB_AGENT" && -z "$TB_AGENT_IMPORT_PATH" ]]; then
@@ -1159,26 +1210,32 @@ main() {
 
   docker_hub_preflight_check
 
-  if [[ "$OPIK_MODE" != "local" && "$OPIK_MODE" != "remote" ]]; then
-    echo "[ERROR] OPIK_MODE must be local or remote, got: $OPIK_MODE" >&2
-    exit 1
-  fi
-
-  if [[ "$OPIK_MODE" == "local" ]]; then
-    ensure_opik_repo
-  fi
-  prepare_local_dataset_if_needed
-  if [[ "$OPIK_MODE" == "local" ]]; then
-    start_opik_local
+  if ! harbor_trace_to_opik_enabled; then
+    echo "[INFO] TRACE_TO_OPIK=false, skip Opik readiness checks"
   else
-    if [[ "$OPIK_BASE" == "http://localhost:5173" && "$OPIK_URL_OVERRIDE" == "http://localhost:5173/api" ]]; then
-      echo "[ERROR] OPIK_MODE=remote requires a real remote Opik endpoint." >&2
-      echo "[ERROR] please set OPIK_BASE (for example: https://your-opik-host)" >&2
-      echo "[ERROR] and optionally OPIK_URL_OVERRIDE (for example: https://your-opik-host/api)." >&2
+    if [[ "$OPIK_MODE" != "local" && "$OPIK_MODE" != "remote" ]]; then
+      echo "[ERROR] OPIK_MODE must be local or remote, got: $OPIK_MODE" >&2
       exit 1
     fi
-    verify_opik_reachable
-    verify_opik_ingestion_route
+
+    if [[ "$OPIK_MODE" == "local" ]]; then
+      ensure_opik_repo
+    fi
+  fi
+  prepare_local_dataset_if_needed
+  if harbor_trace_to_opik_enabled; then
+    if [[ "$OPIK_MODE" == "local" ]]; then
+      start_opik_local
+    else
+      if [[ "$OPIK_BASE" == "http://localhost:5173" && "$OPIK_URL_OVERRIDE" == "http://localhost:5173/api" ]]; then
+        echo "[ERROR] OPIK_MODE=remote requires a real remote Opik endpoint." >&2
+        echo "[ERROR] please set OPIK_BASE (for example: https://your-opik-host)" >&2
+        echo "[ERROR] and optionally OPIK_URL_OVERRIDE (for example: https://your-opik-host/api)." >&2
+        exit 1
+      fi
+      verify_opik_reachable
+      verify_opik_ingestion_route
+    fi
   fi
   run_tb
 }

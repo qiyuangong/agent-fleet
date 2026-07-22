@@ -57,6 +57,15 @@ CONTAINER_PLUGIN_REL = ".config/opencode/plugins"
 CONTAINER_STATE_REL = ".opencode/state"
 
 
+def _trace_to_opik_enabled(extra_env: dict[str, str] | None = None) -> bool:
+    value: str | None = None
+    if extra_env is not None:
+        value = extra_env.get("TRACE_TO_OPIK")
+    if value is None:
+        value = os.environ.get("TRACE_TO_OPIK", "true")
+    return value not in {"false", "0"}
+
+
 # ── url helpers ───────────────────────────────────────────────────────────────
 
 
@@ -388,6 +397,14 @@ class OpikOpenCodeHarbor(OpenCode):
             sanity_check=_opencode_present,
         )
 
+        if not _trace_to_opik_enabled(getattr(self, "_extra_env", None)):
+            print(
+                "[opik-cold] TRACE_TO_OPIK=false: skip Opik hook dependencies "
+                "and plugin files",
+                flush=True,
+            )
+            return
+
         async def _run_hook_python_deps_install() -> None:
             # Keep the runtime install offline/cache-first. Only fall back to
             # public pip when neither the mounted cache nor the wheel HTTP
@@ -497,6 +514,7 @@ class OpikOpenCodeHarbor(OpenCode):
         context: AgentContext,
     ) -> None:
         escaped_instruction = shlex.quote(instruction)
+        trace_enabled = _trace_to_opik_enabled(getattr(self, "_extra_env", None))
 
         if not self.model_name:
             raise ValueError("Model name must not be empty")
@@ -510,18 +528,20 @@ class OpikOpenCodeHarbor(OpenCode):
         for key, value in self._extra_env.items():
             env[key] = value
 
-        # Localhost OPIK_URL on the host needs to become
-        # host.docker.internal inside the container, otherwise the
-        # in-container hook can't reach the local Opik backend.
-        for key in ("OPIK_URL", "OPIK_URL_OVERRIDE"):
-            if key in env:
-                env[key] = _rewrite_container_opik_url(env[key])
+        if trace_enabled:
+            # Localhost OPIK_URL on the host needs to become
+            # host.docker.internal inside the container, otherwise the
+            # in-container hook can't reach the local Opik backend.
+            for key in ("OPIK_URL", "OPIK_URL_OVERRIDE"):
+                if key in env:
+                    env[key] = _rewrite_container_opik_url(env[key])
 
         env["OPENCODE_FAKE_VCS"] = "git"
-        # Harbor only downloads EnvironmentPaths.agent_dir after timeout.
-        # Keep the hook runtime backup there so the outer worker can replay the
-        # normal finalizer instead of falling back to a simplified timeout trace.
-        env.setdefault("OC_OPIK_LOGS_DIR", "/logs/agent")
+        if trace_enabled:
+            # Harbor only downloads EnvironmentPaths.agent_dir after timeout.
+            # Keep the hook runtime backup there so the outer worker can replay
+            # the normal finalizer instead of a simplified timeout trace.
+            env.setdefault("OC_OPIK_LOGS_DIR", "/logs/agent")
 
         # Keep opencode realtime traces independent, matching the Claude hook
         # shape: one agent session owns one Opik trace/thread. Do not forward
@@ -536,28 +556,36 @@ class OpikOpenCodeHarbor(OpenCode):
         if config_command:
             await self.exec_as_agent(environment, command=config_command, env=env)
 
-        await self.exec_as_agent(
-            environment,
-            command=(
-                "set -euo pipefail; "
-                "python3 - <<'PY'\n"
-                "import json\n"
-                "from pathlib import Path\n"
-                "cfg_path = Path.home() / '.config/opencode/opencode.json'\n"
-                "plugin_path = str(Path.home() / '.config/opencode/plugins/opik-trace.ts')\n"
-                "data = json.loads(cfg_path.read_text()) if cfg_path.exists() else {}\n"
-                "plugins = data.get('plugin')\n"
-                "if not isinstance(plugins, list):\n"
-                "    plugins = []\n"
-                "if plugin_path not in plugins:\n"
-                "    plugins.append(plugin_path)\n"
-                "data['plugin'] = plugins\n"
-                "cfg_path.parent.mkdir(parents=True, exist_ok=True)\n"
-                "cfg_path.write_text(json.dumps(data, indent=2))\n"
-                "PY"
-            ),
-            env=env,
-        )
+        if trace_enabled:
+            await self.exec_as_agent(
+                environment,
+                command=(
+                    "set -euo pipefail; "
+                    "python3 - <<'PY'\n"
+                    "import json\n"
+                    "from pathlib import Path\n"
+                    "cfg_path = Path.home() / '.config/opencode/opencode.json'\n"
+                    "plugin_path = str(Path.home() / '.config/opencode/plugins/opik-trace.ts')\n"
+                    "data = json.loads(cfg_path.read_text()) if cfg_path.exists() else {}\n"
+                    "plugins = data.get('plugin')\n"
+                    "if not isinstance(plugins, list):\n"
+                    "    plugins = []\n"
+                    "if plugin_path not in plugins:\n"
+                    "    plugins.append(plugin_path)\n"
+                    "data['plugin'] = plugins\n"
+                    "cfg_path.parent.mkdir(parents=True, exist_ok=True)\n"
+                    "cfg_path.write_text(json.dumps(data, indent=2))\n"
+                    "PY"
+                ),
+                env=env,
+            )
+
+        finalize_command = ""
+        if trace_enabled:
+            finalize_command = (
+                f'python3 "$HOME/{CONTAINER_PLUGIN_REL}/finalize_opencode_sessions.py" '
+                ">>/logs/agent/opencode.txt 2>&1 || true; "
+            )
 
         await self.exec_as_agent(
             environment,
@@ -572,8 +600,7 @@ class OpikOpenCodeHarbor(OpenCode):
                 # under Harbor. Keep finalization best-effort, but return the
                 # original opencode status so Harbor retries/accounting still work.
                 "opencode_rc=$?; "
-                f"python3 \"$HOME/{CONTAINER_PLUGIN_REL}/finalize_opencode_sessions.py\" "
-                f">>/logs/agent/opencode.txt 2>&1 || true; "
+                f"{finalize_command}"
                 "exit \"$opencode_rc\""
             ),
             env=env,

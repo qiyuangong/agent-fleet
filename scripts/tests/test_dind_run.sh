@@ -59,6 +59,7 @@ DIND_BOOTSTRAP=always \
 HTTP_PROXY=http://proxy.invalid:8080 \
 HTTPS_PROXY=http://proxy.invalid:8443 \
 NO_PROXY=existing.example \
+TRACE_TO_OPIK=false \
 "$PROJECT_DIR/scripts/dind-run.sh" --taskset terminalbench21 --agent claude-code --workers 1 > "$LOG"
 
 grep -q -- '--registry-mirror=https://docker.m.daocloud.io' "$LOG"
@@ -76,6 +77,8 @@ grep -q -- '<-e> <no_proxy=existing.example,127.0.0.1,localhost,host.docker.inte
 grep -q -- "<build> <--build-arg> <DIND_BASE_IMAGE=m.daocloud.io/docker.io/library/docker:28-dind> <-f> <$PROJECT_DIR/scripts/dind/Dockerfile> <-t> <sii-agent-fleet-dind:28> <$PROJECT_DIR>" "$LOG"
 grep -q -- '<sii-agent-fleet-dind:28>' "$LOG"
 grep -q -- '<env> <REPO_DIR='"$PROJECT_DIR"'> <BASE_URL=https://local.example.com> <API_KEY=sk-local> <MODEL=local-model>' "$LOG"
+# The documented no-Opik escape must survive the DinD env handoff.
+grep -q -- '<TRACE_TO_OPIK=false>' "$LOG"
 if grep -q -- '<sh> <-lc>.*apk add' "$LOG"; then
   echo "dind-run.sh installed dependencies inside the running DinD container" >&2
   exit 1

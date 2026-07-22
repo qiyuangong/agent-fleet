@@ -55,6 +55,31 @@ class WorkerMountTests(unittest.TestCase):
         )
         self.assertNotIn(":/home/node/.openclaw", command)
 
+    def test_trace_off_worker_omits_opik_state_mount(self):
+        docker_cmd = self.runner.build_worker_docker_command(
+            image="pinchbench-runner:local",
+            instance_index=1,
+            container_prefix="fleet",
+            token="fleet-token",
+            openrouter_key="router-key",
+            openai_api_key="custom-key",
+            model_provider="openai-compatible",
+            uv_cache_dir=Path("/tmp/uv-cache"),
+            pinchbench_dir=Path("/tmp/pinchbench-skill"),
+            worker_dir=Path("/tmp/worker"),
+            config_dir=Path("/tmp/config"),
+            workspace_dir=Path("/tmp/openclaw-workspace"),
+            plugin_cache_dir=None,
+            results_dir=Path("/tmp/results"),
+            opik_state_dir=None,
+            bench_cmd="echo test",
+            container_env={"TRACE_TO_OPIK": "false"},
+        )
+
+        command = " ".join(docker_cmd)
+        self.assertNotIn("pinchbench-opik-state", command)
+        self.assertIn("-e TRACE_TO_OPIK=false", command)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -51,7 +51,10 @@ make_capture_bin() {
   local path="$1"
   cat >"$path" <<'SH'
 #!/usr/bin/env bash
+printf '%s' "${OPIK_TRACK_DISABLE:-}" >"${HARBOR_CAPTURE_FILE}.opik-track-disable"
 python3 - "$HARBOR_CAPTURE_FILE" "$@" <<'PY'
+import json
+import os
 import sys
 from pathlib import Path
 
@@ -59,6 +62,17 @@ capture = Path(sys.argv[1])
 args = sys.argv[2:]
 capture.parent.mkdir(parents=True, exist_ok=True)
 capture.write_bytes(b"\0".join(arg.encode() for arg in args) + b"\0")
+connection_fields = (
+    "OPIK_URL",
+    "OPIK_URL_OVERRIDE",
+    "OPIK_BASE",
+    "OPIK_MODE",
+    "OPIK_PROJECT_NAME",
+    "OPIK_API_KEY",
+    "OPIK_WORKSPACE",
+)
+inherited = {name: os.environ[name] for name in connection_fields if name in os.environ}
+Path(f"{capture}.opik-environment").write_text(json.dumps(inherited, sort_keys=True))
 PY
 SH
   chmod +x "$path"
@@ -135,6 +149,49 @@ if not any(args[index:index + 2] == [option, expected] for index in range(len(ar
 PY
 }
 
+assert_file_content() {
+  local path="$1"
+  local expected="$2"
+  local actual
+  actual="$(cat "$path")"
+  if [[ "$actual" != "$expected" ]]; then
+    echo "unexpected content in $path: '$actual' (expected '$expected')" >&2
+    return 1
+  fi
+}
+
+assert_arg_absent() {
+  local capture_file="$1"
+  local needle="$2"
+  python3 - "$capture_file" "$needle" <<'PY'
+import sys
+from pathlib import Path
+
+args = [part.decode() for part in Path(sys.argv[1]).read_bytes().split(b"\0") if part]
+needle = sys.argv[2]
+if any(needle in arg for arg in args):
+    raise SystemExit(f"unexpected {needle!r} in command: {args!r}")
+PY
+}
+
+assert_mount_source_absent() {
+  local capture_file="$1"
+  local needle="$2"
+  python3 - "$capture_file" "$needle" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+args = [part.decode() for part in Path(sys.argv[1]).read_bytes().split(b"\0") if part]
+needle = sys.argv[2]
+if "--mounts-json" in args:
+    mounts = json.loads(args[args.index("--mounts-json") + 1])
+    for mount in mounts:
+        if needle in mount.get("source", ""):
+            raise SystemExit(f"unexpected mount source with {needle!r}: {mounts!r}")
+PY
+}
+
 run_harboropik() {
   local agent="$1"
   local capture_bin="$2"
@@ -142,6 +199,17 @@ run_harboropik() {
   local output_dir="$4"
   local dataset_name="${5:-example/dataset@1.0}"
   local include_tasks="${6:-}"
+  local trace="${7:-true}"
+  local opik_base="http://opik.example"
+  local opik_url_override="http://opik.example/api"
+  local hook_flag="1"
+  if [[ "$trace" == "false" ]]; then
+    # No Opik configuration at all: the run must still work, and the
+    # hook default must follow the disabled tracing switch.
+    opik_base=""
+    opik_url_override=""
+    hook_flag=""
+  fi
   local fake_bin
   local trace_dir
   local wheel_dir
@@ -151,13 +219,15 @@ run_harboropik() {
   wheel_dir="$output_dir/wheels"
   mkdir -p "$wheel_dir"
   trace_dir="$output_dir/trace"
-  mkdir -p \
-    "$trace_dir/src/sii_opik_plugin/claude_code" \
-    "$trace_dir/src/sii_opik_plugin/opencode" \
-    "$trace_dir/harness/opencode"
-  : >"$trace_dir/src/sii_opik_plugin/claude_code/claude_realtime_trace.py"
-  : >"$trace_dir/src/sii_opik_plugin/opencode/opencode_realtime_trace.py"
-  : >"$trace_dir/harness/opencode/opik-trace.ts"
+  if [[ "$trace" != "false" ]]; then
+    mkdir -p \
+      "$trace_dir/src/sii_opik_plugin/claude_code" \
+      "$trace_dir/src/sii_opik_plugin/opencode" \
+      "$trace_dir/harness/opencode"
+    : >"$trace_dir/src/sii_opik_plugin/claude_code/claude_realtime_trace.py"
+    : >"$trace_dir/src/sii_opik_plugin/opencode/opencode_realtime_trace.py"
+    : >"$trace_dir/harness/opencode/opik-trace.ts"
+  fi
 
   local log_file="$output_dir/$agent.log"
   if ! env -i \
@@ -169,15 +239,14 @@ run_harboropik() {
     OUTPUT_PATH="$output_dir/run" \
     HARBOR_QUEUE_WORKER="1" \
     OPIK_MODE="remote" \
-    OPIK_BASE="http://opik.example" \
-    OPIK_URL_OVERRIDE="http://opik.example/api" \
+    OPIK_BASE="$opik_base" \
+    OPIK_URL_OVERRIDE="$opik_url_override" \
     OPIK_API_KEY="fake-opik-key" \
     BASE_URL="http://llm.example" \
     API_KEY="fake-llm-key" \
     MODEL="fake-model" \
-    TRACE_TO_OPIK="true" \
-    TB_TRACE_TO_OPIK="true" \
-    TB_CC_OPIK_ENABLE_HOOK="1" \
+    TRACE_TO_OPIK="$trace" \
+    TB_CC_OPIK_ENABLE_HOOK="$hook_flag" \
     TB_CC_PY_WHEEL_DIR_SOURCE="$wheel_dir" \
     TRACE_PLUGIN_SOURCE_DIR="$trace_dir" \
     TB_SKIP_DOCKERHUB_PREFLIGHT="1" \
@@ -198,7 +267,7 @@ run_harboropik() {
 
 main() {
   local tmp fake_bin default_overlay claude_capture opencode_capture capture_bin
-  local seta_capture sweverify_capture
+  local seta_capture sweverify_capture traceoff_capture traceoff_oc_capture
   tmp="$(mktemp -d)"
   TEST_TMP_DIR="$tmp"
   trap 'rm -rf "$TEST_TMP_DIR"' EXIT
@@ -242,6 +311,43 @@ main() {
     "sweverify" "astropy__astropy-12907"
   assert_arg_pair "$sweverify_capture" "--dataset" "swebench-verified"
   assert_arg_pair "$sweverify_capture" "-i" "astropy__astropy-12907"
+
+  # TRACE_TO_OPIK=false with no Opik configuration at all: the run must
+  # still construct the benchmark command, with the realtime hook off.
+  traceoff_capture="$tmp/claude-traceoff.args"
+  run_harboropik \
+    "claude-code" "$capture_bin" "$traceoff_capture" "$tmp/claude-traceoff" \
+    "codepde@1.0" "" "false"
+  assert_arg_pair "$traceoff_capture" "--dataset" "codepde@1.0"
+  assert_arg_pair "$traceoff_capture" "--ae" "TRACE_TO_OPIK=false"
+  assert_arg_pair "$traceoff_capture" "--ae" "CC_OPIK_ENABLE_HOOK=false"
+  assert_file_content "${traceoff_capture}.opik-track-disable" "true"
+  assert_file_content "${traceoff_capture}.opik-environment" "{}"
+  # Trace-off keeps the agent runtime cache mounted while dropping the hook
+  # mount and every Opik connection field from the task environment.
+  assert_structured_mount_arg \
+    "$traceoff_capture" \
+    "$tmp/claude-traceoff/wheels" \
+    "/opt/tb-opik/python-wheels"
+  assert_mount_source_absent "$traceoff_capture" "claude_realtime_trace"
+  assert_arg_absent "$traceoff_capture" "OPIK_API_KEY="
+  assert_arg_absent "$traceoff_capture" "OPIK_URL="
+
+  traceoff_oc_capture="$tmp/opencode-traceoff.args"
+  run_harboropik \
+    "opencode" "$capture_bin" "$traceoff_oc_capture" "$tmp/opencode-traceoff" \
+    "terminalbench21" "fix-git" "false"
+  assert_arg_pair "$traceoff_oc_capture" "--dataset" "terminal-bench/terminal-bench-2-1"
+  assert_arg_pair "$traceoff_oc_capture" "-i" "terminal-bench/fix-git"
+  assert_arg_pair "$traceoff_oc_capture" "--ae" "TRACE_TO_OPIK=false"
+  assert_file_content "${traceoff_oc_capture}.opik-track-disable" "true"
+  assert_file_content "${traceoff_oc_capture}.opik-environment" "{}"
+  assert_arg_absent "$traceoff_oc_capture" "OPIK_API_KEY="
+  assert_arg_absent "$traceoff_oc_capture" "OPIK_URL="
+
+  # The tracing control case still forwards the connection fields.
+  assert_arg_pair "$claude_capture" "--ae" "OPIK_API_KEY=fake-opik-key"
+  assert_arg_pair "$opencode_capture" "--ae" "OPIK_API_KEY=fake-opik-key"
 }
 
 main "$@"

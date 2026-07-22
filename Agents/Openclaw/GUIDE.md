@@ -75,6 +75,7 @@ DEFAULT_PORTS_OFFSET="100" \
 | `WORKSPACE_ONLY` | `true` | Default value for `tools.fs.workspaceOnly`; set `false` to let skills read outside the workspace (e.g. plugin/extension dirs) |
 | `DOCKER_COMPOSE_READ_ONLY` | `true` | Default value for generated Compose `read_only` |
 | `OPENCLAW_IMAGE` | `openclaw:local` | Docker image to use |
+| `TRACE_TO_OPIK` | `true` | Fleet-wide tracing switch; `false` forces the OpenClaw plugin off |
 | `OPIK_PLUGIN` | `disabled` | Set to `enabled` to activate opik tracing |
 | `OPIK_URL` | _(none)_ | Opik API endpoint (required when `OPIK_PLUGIN=enabled`) |
 | `OPIK_PROJECT_NAME` | _(none)_ | Opik project name (required when `OPIK_PLUGIN=enabled`) |
@@ -101,6 +102,12 @@ OPIK_PROJECT_NAME="my-project" \
 BASE_URL="https://api.example.com/v1" API_KEY="sk-xxx" MODEL="nex/nex-n1.1" \
 ./Agents/Openclaw/scripts/setup.sh 3
 ```
+
+`TRACE_TO_OPIK=false` is authoritative: shared setup and image builds ignore a
+stale `OPIK_PLUGIN=enabled` value and use `openclaw:local` without requiring an
+Opik endpoint or plugin checkout. Both scripts read `config.env`,
+`config.local.env`, and `config/fleet.env`; one-off caller environment values
+retain the highest precedence.
 
 ### Package Mirrors
 
@@ -221,10 +228,13 @@ ansible-playbook -i Agents/Openclaw/config/ansible/inventory.ini \
   -e base_url="https://api.example.com/v1" \
   -e api_key="sk-xxx" \
   -e model="nex/nex-n1.1" \
+  -e trace_to_opik=false \
   -e openclaw_image="registry.example.com/openclaw:latest"
 ```
 
 The playbook renders `Agents/Openclaw/config/ansible/templates/fleet.env.j2` into `Agents/Openclaw/config/fleet.env` on each node, then runs `setup.sh` and `docker compose up -d`.
+To enable tracing, set `trace_to_opik=true`, `opik_plugin=enabled`,
+`opik_url`, and `opik_project_name`.
 
 ### Linux Notes
 

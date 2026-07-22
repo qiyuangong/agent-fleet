@@ -40,6 +40,10 @@ import os
 import sys
 
 
+def _trace_to_opik_enabled() -> bool:
+    return os.environ.get("TRACE_TO_OPIK", "true") not in {"false", "0"}
+
+
 def _clean_tags(tags: object) -> list[str]:
     if not tags:
         return []
@@ -108,9 +112,10 @@ def _patch_trial_decorator_with_tb_tags() -> None:
 
 
 def main() -> None:
-    _patch_opik_batch_tags()
-    _install_track_harbor()
-    _patch_trial_decorator_with_tb_tags()
+    if _trace_to_opik_enabled():
+        _patch_opik_batch_tags()
+        _install_track_harbor()
+        _patch_trial_decorator_with_tb_tags()
 
     from harbor.cli.main import app
 

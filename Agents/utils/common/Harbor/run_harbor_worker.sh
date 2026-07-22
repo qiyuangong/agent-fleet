@@ -98,6 +98,12 @@ find_trial_logs_dir() {
 
 finalize_timeout_trace() {
   local result_file="$1"
+  # Timeout finalization replays hook backups into Opik. With tracing off
+  # there is no server to write to, for either agent's fallback path.
+  if ! harbor_trace_to_opik_enabled; then
+    log_msg "timeout finalize skipped: TRACE_TO_OPIK=false"
+    return 0
+  fi
   local logs_dir py
   logs_dir="$(find_trial_logs_dir "$result_file" || true)"
   [[ -n "${logs_dir:-}" && -d "$logs_dir" ]] || {

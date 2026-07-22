@@ -29,12 +29,15 @@ cp config.env config.local.env
 vim config.local.env
 ```
 
-Set your model gateway, Opik endpoint, and package mirrors there:
+Set your model gateway and tracing preference there. Opik endpoint values are
+required only when tracing is enabled:
 
 ```bash
 BASE_URL=https://your-openai-compatible-endpoint
 API_KEY=your-api-key
 MODEL=your-model-id
+TRACE_TO_OPIK=false
+# When TRACE_TO_OPIK=true:
 OPIK_URL=http://your-opik-host/api
 OPIK_PROJECT_NAME=your-project-name
 ```
@@ -48,8 +51,8 @@ TOTAL_WORKERS="80"
 TB_N_CONCURRENT="80"
 ```
 
-The Opik tracing plugin is loaded from the `third_party/sii-opik-plugin`
-submodule. Initialize it before running:
+When `TRACE_TO_OPIK=true` (the default), the Opik tracing plugin is loaded from
+the `third_party/sii-opik-plugin` submodule. Initialize it before a traced run:
 
 ```bash
 git submodule update --init --recursive

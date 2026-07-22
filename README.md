@@ -31,8 +31,14 @@ Export your model gateway credentials:
 export BASE_URL=https://your-model-gateway.example.com   # Model gateway URL, WITHOUT /v1
 export API_KEY=your-api-key                         # Model gateway API key
 export MODEL=your_model_id
-export OPIK_URL=https://your-opik-host/api
+export TRACE_TO_OPIK=true                           # Set false to disable Opik fleet-wide
+export OPIK_URL=https://your-opik-host/api          # Opik tracing endpoint, used by the Harbor/ClawBio runtime
 ```
+
+`OPIK_URL` is required by the benchmark runtime while tracing is enabled
+(the default); setup only persists it into `config.local.env`. To run
+without an Opik server, set `TRACE_TO_OPIK=false`; this also disables the
+OpenClaw plugin and PinchBench tracer paths.
 
 ### Step 2 — Run setup.sh
 

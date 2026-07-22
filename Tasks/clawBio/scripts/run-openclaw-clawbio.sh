@@ -26,7 +26,8 @@ OPENCLAW_UID="${OPENCLAW_UID:-$(id -u)}"
 OPENCLAW_GID="${OPENCLAW_GID:-$(id -g)}"
 OPENCLAW_CONTAINER_USER="${OPENCLAW_CONTAINER_USER:-$OPENCLAW_UID}"
 
-OPIK_PLUGIN="${OPIK_PLUGIN:-enabled}"
+# Default is resolved after config loading so it can follow TRACE_TO_OPIK.
+OPIK_PLUGIN="${OPIK_PLUGIN:-}"
 OPIK_URL="${OPIK_URL:-}"
 OPIK_WORKSPACE="${OPIK_WORKSPACE:-default}"
 OPIK_API_KEY="${OPIK_API_KEY:-}"
@@ -44,14 +45,14 @@ Usage: $(basename "$0")
 
 One-command launcher for ClawBio benchmark:
 1) optionally build/reuse OpenClaw image
-2) setup OpenClaw fleet with OPIK enabled
+2) setup OpenClaw fleet with optional Opik tracing
 3) patch clawbio plugin config
 4) start fleet containers
 5) run benchmark via run-benchmark.py (native -n iterations)
 
 Optional env vars:
   COUNT, ITERATIONS, TASK_CONFIG, RUN_ROOT
-  OPIK_URL, OPIK_WORKSPACE, OPIK_API_KEY, OPIK_PROJECT_NAME
+  TRACE_TO_OPIK, OPIK_URL, OPIK_WORKSPACE, OPIK_API_KEY, OPIK_PROJECT_NAME
   OPENCLAW_IMAGE_POLICY=if-missing|always
   CONFIG_BASE, WORKSPACE_BASE, PLUGIN_CACHE_DIR
 
@@ -96,6 +97,27 @@ fi
 eval "$__caller_env"
 unset __caller_env
 
+# TRACE_TO_OPIK is the authoritative switch documented in the root README:
+# tracing off forces the plugin off, even over an explicit
+# OPIK_PLUGIN=enabled lingering in fleet.env or another config file. With
+# tracing on, an explicit OPIK_PLUGIN still wins and the default is enabled.
+case "${TRACE_TO_OPIK:-true}" in
+  false|0)
+    if [[ "$OPIK_PLUGIN" == "enabled" ]]; then
+      echo "TRACE_TO_OPIK=false overrides OPIK_PLUGIN=enabled; tracing plugin disabled" >&2
+    fi
+    OPIK_PLUGIN=disabled
+    # These values may have been exported while loading config files. Clear
+    # them before invoking setup/build/benchmark children so trace-off runs do
+    # not retain unnecessary Opik credentials in their process environments.
+    OPIK_URL=""
+    OPIK_WORKSPACE=""
+    OPIK_API_KEY=""
+    OPIK_PROJECT_NAME=""
+    ;;
+  *) OPIK_PLUGIN="${OPIK_PLUGIN:-enabled}" ;;
+esac
+
 if [[ "$OPIK_PLUGIN" == "enabled" ]]; then
   if [[ -z "$OPIK_URL" ]]; then
     echo "Error: OPIK_PLUGIN=enabled requires OPIK_URL." >&2
@@ -116,8 +138,13 @@ echo "iterations:     $ITERATIONS"
 echo "run root:       $RUN_ROOT"
 echo "task config:    $TASK_CONFIG"
 echo "image policy:   $OPENCLAW_IMAGE_POLICY"
-echo "opik project:   $OPIK_PROJECT_NAME"
-echo "opik url:       $OPIK_URL"
+if [[ "$OPIK_PLUGIN" == "enabled" ]]; then
+  echo "opik tracing:   enabled"
+  echo "opik project:   $OPIK_PROJECT_NAME"
+  echo "opik url:       $OPIK_URL"
+else
+  echo "opik tracing:   disabled"
+fi
 echo
 
 cd "$REPO_ROOT"
@@ -132,19 +159,20 @@ elif [[ "$OPIK_PLUGIN" == "enabled" ]] && ! image_exists "openclaw:local-opik"; 
 fi
 
 if [[ "$need_build" -eq 1 ]]; then
-  OPIK_PLUGIN="$OPIK_PLUGIN" "$OPENCLAW_DIR/scripts/build-openclaw-image.sh"
-else
+  TRACE_TO_OPIK="${TRACE_TO_OPIK:-true}" \
+    OPIK_PLUGIN="$OPIK_PLUGIN" \
+    "$OPENCLAW_DIR/scripts/build-openclaw-image.sh"
+elif [[ "$OPIK_PLUGIN" == "enabled" ]]; then
   echo "Reusing local images: openclaw:local and openclaw:local-opik"
+else
+  echo "Reusing local image: openclaw:local"
 fi
 
 "$BENCH_DIR/scripts/prewarm-cache.sh" --cache-dir "$PLUGIN_CACHE_DIR"
 
 env_args=(
+  "TRACE_TO_OPIK=${TRACE_TO_OPIK:-true}"
   "OPIK_PLUGIN=$OPIK_PLUGIN"
-  "OPIK_URL=$OPIK_URL"
-  "OPIK_WORKSPACE=$OPIK_WORKSPACE"
-  "OPIK_API_KEY=$OPIK_API_KEY"
-  "OPIK_PROJECT_NAME=$OPIK_PROJECT_NAME"
   "OPENCLAW_UID=$OPENCLAW_UID"
   "OPENCLAW_GID=$OPENCLAW_GID"
   "OPENCLAW_CONTAINER_USER=$OPENCLAW_CONTAINER_USER"
@@ -152,6 +180,15 @@ env_args=(
   "WORKSPACE_BASE=$WORKSPACE_BASE"
   "PLUGIN_CACHE_DIR=$PLUGIN_CACHE_DIR"
 )
+
+if [[ "$OPIK_PLUGIN" == "enabled" ]]; then
+  env_args+=(
+    "OPIK_URL=$OPIK_URL"
+    "OPIK_WORKSPACE=$OPIK_WORKSPACE"
+    "OPIK_API_KEY=$OPIK_API_KEY"
+    "OPIK_PROJECT_NAME=$OPIK_PROJECT_NAME"
+  )
+fi
 
 if [[ -n "$BASE_URL" ]]; then env_args+=("BASE_URL=$BASE_URL"); fi
 if [[ -n "$API_KEY" ]]; then env_args+=("API_KEY=$API_KEY"); fi
@@ -190,6 +227,10 @@ ln -s "$RUN_NAME" "$LATEST_LINK"
 
 echo
 echo "Run complete."
-echo "Opik project: $OPIK_PROJECT_NAME"
+if [[ "$OPIK_PLUGIN" == "enabled" ]]; then
+  echo "Opik project: $OPIK_PROJECT_NAME"
+else
+  echo "Opik tracing: disabled"
+fi
 echo "Run root:      $RUN_ROOT"
 echo "Latest link:   $LATEST_LINK -> $RUN_NAME"

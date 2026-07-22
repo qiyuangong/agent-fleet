@@ -12,10 +12,12 @@ import sys
 import unittest
 from pathlib import Path
 
-
 OPENCLAW_DIR = Path(__file__).resolve().parents[1]
 SETUP_PY = OPENCLAW_DIR / "scripts" / "setup.py"
 TEMPLATE_PATH = OPENCLAW_DIR / "config" / "openclaw.json.template"
+ANSIBLE_FLEET_TEMPLATE_PATH = (
+    OPENCLAW_DIR / "config" / "ansible" / "templates" / "fleet.env.j2"
+)
 
 
 def _load_setup_module():
@@ -29,6 +31,23 @@ def _load_setup_module():
 setup = _load_setup_module()
 
 
+class AnsibleFleetTemplateTests(unittest.TestCase):
+    def test_trace_switch_is_normalized_in_ansible_template(self):
+        trace_lines = [
+            line
+            for line in ANSIBLE_FLEET_TEMPLATE_PATH.read_text(encoding="utf-8").splitlines()
+            if line.startswith("TRACE_TO_OPIK=")
+        ]
+
+        self.assertEqual(
+            trace_lines,
+            [
+                "TRACE_TO_OPIK={{ 'false' if (trace_to_opik | default(true) | string | lower) "
+                "in ['false', '0'] else 'true' }}"
+            ],
+        )
+
+
 def _base_cfg(**overrides):
     cfg = {
         "BASE_URL": "https://api.example.com/v1",
@@ -39,6 +58,7 @@ def _base_cfg(**overrides):
         "EXEC_SECURITY": "deny",
         "EXEC_ASK": "always",
         "WORKSPACE_ONLY": "true",
+        "TRACE_TO_OPIK": "true",
         "OPIK_PLUGIN": "disabled",
         "OPIK_URL": "",
         "OPIK_API_KEY": "",
@@ -226,6 +246,21 @@ class ResolveConfigTests(unittest.TestCase):
         env = {"BASE_URL": "u", "API_KEY": "k", "HOME": "/h"}
         cfg = setup.resolve_config(env, [])
         self.assertEqual(cfg["SANDBOX_MODE"], "off")
+
+    def test_trace_off_overrides_stale_enabled_opik_plugin(self):
+        env = {
+            "BASE_URL": "u",
+            "API_KEY": "k",
+            "HOME": "/h",
+            "TRACE_TO_OPIK": "false",
+            "OPIK_PLUGIN": "enabled",
+        }
+
+        cfg = setup.resolve_config(env, [])
+
+        self.assertEqual(cfg["TRACE_TO_OPIK"], "false")
+        self.assertEqual(cfg["OPIK_PLUGIN"], "disabled")
+        setup.validate_required(cfg)
 
     def test_cli_count_overrides_env(self):
         env = {"COUNT": "2", "BASE_URL": "u", "API_KEY": "k", "HOME": "/h"}

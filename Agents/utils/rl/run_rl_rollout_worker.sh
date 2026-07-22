@@ -193,6 +193,13 @@ find_trial_logs_dir() {
 
 finalize_timeout_trace() {
   local result_file="$1"
+  # Rollout workers have their own timeout finalization path. Keep it behind
+  # the same trace switch as the fixed-dataset worker so trace-off runs never
+  # replay Claude or OpenCode hook backups into Opik.
+  if ! harbor_trace_to_opik_enabled; then
+    log_msg "timeout finalize skipped: TRACE_TO_OPIK=false"
+    return 0
+  fi
   local project_name="${2:-${OPIK_PROJECT_NAME:-}}"
   local run_id="${3:-${TB_RUN_ID:-}}"
   local task_id="${4:-${TB_TASK_ID:-}}"

@@ -50,8 +50,11 @@ The benchmark distributes tasks across instances using round-robin scheduling an
 
 ```bash
 # From repo root
-OPIK_PLUGIN=enabled ./Agents/Openclaw/scripts/build-openclaw-image.sh
+TRACE_TO_OPIK=false ./Agents/Openclaw/scripts/build-openclaw-image.sh
 ```
+
+For tracing, initialize the submodule and build with
+`TRACE_TO_OPIK=true OPIK_PLUGIN=enabled` instead.
 
 ---
 
@@ -122,9 +125,7 @@ Generate and start the OpenClaw fleet with plugin cache mounted:
 ```bash
 # From repo root
 PLUGIN_CACHE_DIR=$(pwd)/Tasks/clawBio/cache \
-OPIK_PLUGIN=enabled \
-OPIK_URL="https://your-opik.example.com/api/" \
-OPIK_PROJECT_NAME="clawbio-bench" \
+TRACE_TO_OPIK=false \
 BASE_URL="https://api.example.com/v1" \
 API_KEY="sk-xxx" \
 MODEL="your-model" \

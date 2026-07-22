@@ -12,11 +12,12 @@ DATASET_NAME=seta \
 MODEL=minimax2.7 \
 BASE_URL="https://your-openai-compatible-endpoint" \
 API_KEY="sk-xxx" \
+TRACE_TO_OPIK=false \
 bash start.sh
 ```
 
 This directory is not usually launched directly. Use `Agents/utils/common/Harbor/start.sh`.
-The realtime plugin and hook are loaded from the `third_party/sii-opik-plugin`
-submodule.
+For traced runs, the realtime plugin and hook are loaded from the
+`third_party/sii-opik-plugin` submodule; trace-off runs do not require it.
 
 Structure details: [STRUCT.md](./STRUCT.md)

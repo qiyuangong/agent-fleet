@@ -304,7 +304,7 @@ JSON
 ok "Skills plugin installed to $CLAUDE_PLUGIN_DIR"
 
 # ---- 9. Merge managed keys into config.local.env ----
-# Update only the keys setup.sh manages (BASE_URL/API_KEY/MODEL + OPIK_*),
+# Update only the keys setup.sh manages (BASE_URL/API_KEY/MODEL + tracing/Opik),
 # preserve any other private overrides the user has added (mirrors, etc.).
 # BASE_URL is stored as-is (without /v1), matching the repo convention:
 # config.env documents BASE_URL as the API root without a version suffix;
@@ -315,6 +315,7 @@ cp -f "$CONFIG_LOCAL" "$CONFIG_LOCAL.bak.sii-agent-fleet" 2>/dev/null || true
 BASE_URL="$BASE_URL" \
 AUTH_TOKEN="$AUTH_TOKEN" \
 MODEL="$MODEL" \
+TRACE_TO_OPIK="${TRACE_TO_OPIK:-}" \
 OPIK_URL="${OPIK_URL:-}" \
 OPIK_API_KEY="${OPIK_API_KEY:-}" \
 OPIK_WORKSPACE="${OPIK_WORKSPACE:-}" \
@@ -335,6 +336,9 @@ managed = {
     "API_KEY": token,
     "MODEL": model,
 }
+trace_to_opik = os.environ.get("TRACE_TO_OPIK", "").strip()
+if trace_to_opik:
+    managed["TRACE_TO_OPIK"] = trace_to_opik
 opik_url = os.environ.get("OPIK_URL", "").strip()
 if opik_url:
     managed["OPIK_URL"] = opik_url

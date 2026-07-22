@@ -124,7 +124,19 @@ def _fallback_timeout_trace(logs_dir: Path, status: str) -> int:
         return 1
 
 
+def _trace_to_opik_enabled() -> bool:
+    if os.environ.get("OPIK_TRACK_DISABLE", "").lower() in {"true", "1"}:
+        return False
+    return os.environ.get("TRACE_TO_OPIK", "true") not in {"false", "0"}
+
+
 def main() -> int:
+    # Defense in depth for the worker-side timeout replay: even if a caller
+    # forgets the shell gate, a trace-off run must never write to Opik.
+    if not _trace_to_opik_enabled():
+        print("[INFO] finalize skipped: Opik tracing disabled")
+        return 0
+
     status = "completed"
     logs_dir: Path | None = None
     argv = sys.argv[1:]

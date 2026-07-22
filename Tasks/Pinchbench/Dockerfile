@@ -1,4 +1,5 @@
-FROM openclaw:local-opik
+ARG OPENCLAW_BASE_IMAGE=openclaw:local-opik
+FROM ${OPENCLAW_BASE_IMAGE}
 
 LABEL org.opencontainers.image.source="https://github.com/pinchbench/skill"
 LABEL org.opencontainers.image.description="PinchBench runner with OpenClaw CLI"
@@ -6,8 +7,13 @@ LABEL org.opencontainers.image.description="PinchBench runner with OpenClaw CLI"
 ARG PIP_INDEX_URL=""
 ARG PIP_EXTRA_INDEX_URL=""
 ARG PIP_TRUSTED_HOST=""
+ARG TRACE_TO_OPIK=true
 
 USER root
+
+# The runner probes this marker before reuse so switching tracing modes cannot
+# silently reuse an image built from the opposite OpenClaw base.
+RUN printf '%s\n' "$TRACE_TO_OPIK" > /opt/pinchbench-trace-to-opik
 
 RUN apt-get update && apt-get install -y \
     python3 \
@@ -27,13 +33,15 @@ RUN ln -sf /root/.local/bin/uv /usr/local/bin/uv \
 # Keep this path aligned with Agents/Openclaw/scripts/setup.py. PinchBench worker
 # containers use the same OpenClaw CLI version as the fleet gateway; a CLI/gateway
 # protocol mismatch falls back to embedded execution and bypasses tracer uploads.
-RUN python3 -m venv /opt/opik-venv \
-    && if [ -n "$PIP_INDEX_URL" ]; then export PIP_INDEX_URL; fi \
-    && if [ -n "$PIP_EXTRA_INDEX_URL" ]; then export PIP_EXTRA_INDEX_URL; fi \
-    && if [ -n "$PIP_TRUSTED_HOST" ]; then export PIP_TRUSTED_HOST; fi \
-    && /opt/opik-venv/bin/pip install --no-cache-dir --quiet "opik>=1.0.0" uuid6 socksio \
-    && chown -R root:root /opt/openclaw-plugins/openclaw-opik-tracer \
-    && chmod -R a+rX /opt/openclaw-plugins/openclaw-opik-tracer
+RUN if [ "$TRACE_TO_OPIK" != "false" ] && [ "$TRACE_TO_OPIK" != "0" ]; then \
+      python3 -m venv /opt/opik-venv \
+      && if [ -n "$PIP_INDEX_URL" ]; then export PIP_INDEX_URL; fi \
+      && if [ -n "$PIP_EXTRA_INDEX_URL" ]; then export PIP_EXTRA_INDEX_URL; fi \
+      && if [ -n "$PIP_TRUSTED_HOST" ]; then export PIP_TRUSTED_HOST; fi \
+      && /opt/opik-venv/bin/pip install --no-cache-dir --quiet "opik>=1.0.0" uuid6 socksio \
+      && chown -R root:root /opt/openclaw-plugins/openclaw-opik-tracer \
+      && chmod -R a+rX /opt/openclaw-plugins/openclaw-opik-tracer; \
+    fi
 
 WORKDIR /workspace
 

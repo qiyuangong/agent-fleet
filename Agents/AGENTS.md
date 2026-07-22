@@ -9,8 +9,8 @@ Repo-wide setup and config rules: [root AGENTS.md](../AGENTS.md).
 Runs Claude Code or OpenCode against Harbor datasets in parallel zellij
 workers.
 
-Prereqs: submodule initialized; model gateway and Opik values set in
-`config.local.env`.
+Prereq: model gateway values set in `config.local.env`. For traced runs only,
+also initialize the submodule and configure Opik values.
 
 ### Run
 

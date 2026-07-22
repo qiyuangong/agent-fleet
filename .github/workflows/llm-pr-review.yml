@@ -1,0 +1,38 @@
+name: LLM PR Review
+
+"on":
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: llm-pr-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    if: >-
+      !github.event.pull_request.draft &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out trusted base revision
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+
+      - name: Review pull request
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          LLM_REVIEW_API_KEY: ${{ secrets.LLM_REVIEW_API_KEY }}
+          LLM_REVIEW_BASE_URL: ${{ vars.LLM_REVIEW_BASE_URL }}
+          LLM_REVIEW_MODEL: ${{ vars.LLM_REVIEW_MODEL }}
+        run: >-
+          python3 .github/scripts/llm_pr_review.py
+          --event-path "$GITHUB_EVENT_PATH"
+          --prompt-path .github/scripts/llm_review_prompt.md

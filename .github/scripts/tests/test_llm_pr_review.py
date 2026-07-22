@@ -397,14 +397,14 @@ class OrchestrationTest(unittest.TestCase):
         self.assertEqual(files[0].path, "new_name.py")
         self.assertEqual(files[0].right_lines, frozenset({1}))
 
-    def test_rejects_fork_even_if_workflow_guard_is_bypassed(self) -> None:
+    def test_reviews_fork_pull_request(self) -> None:
         github = FakeGitHub()
         github.pull["head"]["repo"]["full_name"] = "fork/repo"
 
-        with self.assertRaises(review.UntrustedPullRequest):
-            review.run_review(github, FakeLlm(), 7, "owner/repo", "prompt")
+        result = review.run_review(github, FakeLlm(), 7, "prompt")
 
-        self.assertEqual(github.created, [])
+        self.assertEqual(result, "published")
+        self.assertEqual(len(github.created), 1)
 
     def test_aborts_when_head_changes_before_publication(self) -> None:
         github = FakeGitHub()
@@ -412,7 +412,7 @@ class OrchestrationTest(unittest.TestCase):
         second = {**github.pull, "head": {**github.pull["head"], "sha": "head-2"}}
         github.get_pull = mock.Mock(side_effect=[first, second])
 
-        result = review.run_review(github, FakeLlm(), 7, "owner/repo", "prompt")
+        result = review.run_review(github, FakeLlm(), 7, "prompt")
 
         self.assertEqual(result, "stale")
         self.assertEqual(github.created, [])
@@ -426,7 +426,7 @@ class OrchestrationTest(unittest.TestCase):
             }
         ]
 
-        result = review.run_review(github, FakeLlm(), 7, "owner/repo", "prompt")
+        result = review.run_review(github, FakeLlm(), 7, "prompt")
 
         self.assertEqual(result, "duplicate")
         self.assertEqual(github.created, [])
@@ -439,7 +439,7 @@ class OrchestrationTest(unittest.TestCase):
     def test_posts_validated_comment_review(self) -> None:
         github = FakeGitHub()
 
-        result = review.run_review(github, FakeLlm(), 7, "owner/repo", "prompt")
+        result = review.run_review(github, FakeLlm(), 7, "prompt")
 
         self.assertEqual(result, "published")
         number, sha, body, findings = github.created[0]
@@ -452,7 +452,7 @@ class OrchestrationTest(unittest.TestCase):
         llm = mock.Mock()
         llm.review.return_value = {"findings": []}
 
-        review.run_review(github, llm, 7, "owner/repo", "prompt")
+        review.run_review(github, llm, 7, "prompt")
 
         self.assertIn("no actionable findings", github.created[0][2])
 
@@ -460,7 +460,7 @@ class OrchestrationTest(unittest.TestCase):
         github = FakeGitHub()
         llm = FakeLlm()
 
-        review.run_review(github, llm, 7, "owner/repo", "prompt")
+        review.run_review(github, llm, 7, "prompt")
 
         self.assertIn("PR TITLE: Change worker cancellation", llm.inputs[0])
         self.assertIn("PR DESCRIPTION: Keep child processes", llm.inputs[0])
@@ -477,11 +477,11 @@ class OrchestrationTest(unittest.TestCase):
 
 
 class WorkflowContractTest(unittest.TestCase):
-    def test_workflow_uses_trusted_event_and_same_repo_guard(self) -> None:
+    def test_workflow_uses_trusted_event_and_allows_forks(self) -> None:
         workflow = SCRIPT_DIR.parent.joinpath("workflows/llm-pr-review.yml").read_text()
 
         self.assertIn("pull_request_target:", workflow)
-        self.assertIn("head.repo.full_name == github.repository", workflow)
+        self.assertNotIn("head.repo.full_name == github.repository", workflow)
         self.assertIn("!github.event.pull_request.draft", workflow)
         self.assertNotIn("pull_request.head.sha", workflow)
         self.assertNotIn("pull_request.head.ref", workflow)

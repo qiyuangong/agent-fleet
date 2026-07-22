@@ -55,10 +55,6 @@ class ModelResponseError(ValueError):
     pass
 
 
-class UntrustedPullRequest(RuntimeError):
-    pass
-
-
 def skip_reason(path: str, patch: str | None) -> str | None:
     if path in GENERATED_PATHS or path.endswith(GENERATED_SUFFIXES):
         return "generated"
@@ -443,17 +439,11 @@ def run_review(
     github: GitHubClient,
     llm: LlmClient,
     pull_number: int,
-    repository: str,
     prompt: str,
 ) -> str:
     pull = github.get_pull(pull_number)
     if pull.get("draft"):
         return "draft"
-    if (
-        pull["head"]["repo"]["full_name"] != repository
-        or pull["base"]["repo"]["full_name"] != repository
-    ):
-        raise UntrustedPullRequest("fork pull requests are not reviewable")
 
     head_sha = pull["head"]["sha"]
     if has_existing_review(github.list_reviews(pull_number), head_sha):
@@ -509,7 +499,7 @@ def main() -> int:
         require_env("LLM_REVIEW_MODEL"),
     )
     prompt = args.prompt_path.read_text()
-    result = run_review(github, llm, pull_number, repository, prompt)
+    result = run_review(github, llm, pull_number, prompt)
     print(f"LLM PR review result: {result}")
     return 0
 

@@ -60,15 +60,6 @@ Agents/utils/rl/
 - `HARBOR_CLAUDE_CODE_DIR`: Claude Code integration directory
 - `HARBOR_OPENCODE_DIR`: OpenCode integration directory
 
-## Runner Environment
-
-`scripts/dind/Dockerfile` installs the direct dependencies from
-`runner-requirements.txt` into `/opt/harbor-runner`. For direct host runs,
-`scripts/setup.sh` creates the same environment under
-`~/.local/share/sii-agent-fleet/harbor-runner`. Startup only validates the
-versions and CLIs; task-container dependencies remain owned by
-`prepare_local_deps.sh`.
-
 ## Task Resolution
 
 `DATASET_NAME` selects a built-in local dataset alias:

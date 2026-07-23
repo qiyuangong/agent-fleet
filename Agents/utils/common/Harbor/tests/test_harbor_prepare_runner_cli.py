@@ -37,6 +37,7 @@ class RunnerValidationTest(unittest.TestCase):
             "HARBOR_OPIK_PYTHON": str(self.python),
             "HARBOR_OPIK_BIN": str(self.opik),
             "HARBOR_CLI_BIN": str(self.harbor),
+            "HARBOR_RUNNER_PYTHON_VERSION": "3.12.13",
             "HARBOR_RUNNER_REQUIREMENTS": str(self.requirements),
             "RUNTIME_DIR": str(self.runtime),
             "HARBOR_RUNNER_PREPARE_STATUS_FILE": str(self.runtime / "status"),
@@ -54,10 +55,13 @@ class RunnerValidationTest(unittest.TestCase):
         path.write_text(content, encoding="utf-8")
         path.chmod(path.stat().st_mode | stat.S_IXUSR)
 
-    def _write_python(self, harbor_version: str) -> None:
+    def _write_python(
+        self, harbor_version: str, python_version: str = "3.12.13"
+    ) -> None:
         self._write_executable(
             self.python,
             "#!/bin/sh\n"
+            f"[ \"$#\" = 2 ] && echo {python_version} && exit 0\n"
             f"[ \"$3\" = harbor ] && echo {harbor_version} || echo 2.1.32\n",
         )
 
@@ -80,6 +84,12 @@ class RunnerValidationTest(unittest.TestCase):
         with mock.patch.dict(os.environ, self.environment):
             self.assertFalse(MODULE.validate_runner(log))
         self.assertIn("expected 0.18.0, got 0.20.0", log.getvalue())
+
+        self._write_python("0.18.0", "3.11.9")
+        log = io.StringIO()
+        with mock.patch.dict(os.environ, self.environment):
+            self.assertFalse(MODULE.validate_runner(log))
+        self.assertIn("expected 3.12.13, got 3.11.9", log.getvalue())
 
     def test_main_writes_done_or_failed_status(self) -> None:
         with mock.patch.dict(os.environ, self.environment):

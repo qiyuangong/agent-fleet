@@ -15,6 +15,10 @@ VERSION_PROBE = (
     "import importlib.metadata as m, sys; "
     "print(m.version(sys.argv[1]))"
 )
+PYTHON_VERSION_PROBE = (
+    "import sys; "
+    "print('.'.join(str(part) for part in sys.version_info[:3]))"
+)
 
 
 def load_requirements(path: Path) -> list[tuple[str, str]]:
@@ -46,6 +50,24 @@ def validate_runner(log: TextIO) -> bool:
         if not executable.is_file() or not os.access(executable, os.X_OK):
             log.write(f"runner executable is missing: {executable}\n")
             return False
+
+    expected_python = os.environ["HARBOR_RUNNER_PYTHON_VERSION"]
+    try:
+        result = subprocess.run(
+            [str(python), "-c", PYTHON_VERSION_PROBE],
+            capture_output=True,
+            text=True,
+        )
+    except OSError as exc:
+        log.write(f"failed to query runner Python version: {exc}\n")
+        return False
+    actual_python = result.stdout.strip() if result.returncode == 0 else None
+    if actual_python != expected_python:
+        log.write(
+            f"runner Python mismatch: expected {expected_python}, "
+            f"got {actual_python or 'unknown'}\n"
+        )
+        return False
 
     for package, expected in requirements:
         try:

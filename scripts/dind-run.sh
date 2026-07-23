@@ -32,7 +32,8 @@ Useful overrides:
   DIND_MOUNTS               Comma-separated extra docker -v entries
   DIND_DEFAULT_ADDRESS_POOLS Semicolon-separated dockerd pools, e.g. base=10.200.0.0/13,size=21
   DIND_BOOTSTRAP            always|missing|skip (default: missing)
-  DIND_RESET                1 removes the DinD container and Docker storage volume first
+  DIND_RECREATE             1 recreates the DinD container but preserves Docker storage
+  DIND_RESET                1 recreates the DinD container and removes Docker storage
 EOF
 }
 
@@ -262,6 +263,8 @@ container_running() {
 if [[ "${DIND_RESET:-0}" == "1" ]]; then
   docker rm -f "$DIND_NAME" >/dev/null 2>&1 || true
   docker volume rm "$DIND_DOCKER_VOLUME" >/dev/null 2>&1 || true
+elif [[ "${DIND_RECREATE:-0}" == "1" ]]; then
+  docker rm -f "$DIND_NAME" >/dev/null 2>&1 || true
 fi
 
 if ! container_exists; then
@@ -297,7 +300,7 @@ else
     err "existing DinD container $DIND_NAME uses a different runner image"
     err "existing: ${existing_runner_image:-<unlabeled>}"
     err "current:  $DIND_IMAGE"
-    err "rerun with DIND_RESET=1 to recreate the DinD container"
+    err "rerun with DIND_RECREATE=1 to recreate the DinD container while preserving Docker storage"
     exit 1
   fi
   existing_mirrors="$(docker inspect -f '{{ index .Config.Labels "sii.agent-fleet.registry-mirrors" }}' "$DIND_NAME" 2>/dev/null || true)"
@@ -305,7 +308,7 @@ else
     err "existing DinD container $DIND_NAME was created with different registry mirrors"
     err "existing: ${existing_mirrors:-<empty>}"
     err "current:  ${registry_mirrors:-<empty>}"
-    err "rerun with DIND_RESET=1 to recreate the DinD daemon"
+    err "rerun with DIND_RECREATE=1 to recreate the DinD daemon while preserving Docker storage"
     exit 1
   fi
   existing_address_pools="$(docker inspect -f '{{ index .Config.Labels "sii.agent-fleet.default-address-pools" }}' "$DIND_NAME" 2>/dev/null || true)"
@@ -313,7 +316,7 @@ else
     err "existing DinD container $DIND_NAME was created with different default address pools"
     err "existing: ${existing_address_pools:-<empty>}"
     err "current:  ${default_address_pools:-<empty>}"
-    err "rerun with DIND_RESET=1 to recreate the DinD daemon"
+    err "rerun with DIND_RECREATE=1 to recreate the DinD daemon while preserving Docker storage"
     exit 1
   fi
   if ! container_running; then

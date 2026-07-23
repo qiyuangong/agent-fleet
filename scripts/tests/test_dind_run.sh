@@ -21,6 +21,10 @@ cp "$REPO_ROOT/scripts/fleet_spec_validate.jq" "$PROJECT_DIR/scripts/fleet_spec_
 cp \
   "$REPO_ROOT/Agents/utils/common/Harbor/runner-requirements.txt" \
   "$PROJECT_DIR/Agents/utils/common/Harbor/runner-requirements.txt"
+if grep -q -- 'tcp://0.0.0.0:2375' "$PROJECT_DIR/scripts/dind/dockerd-entrypoint.sh"; then
+  echo "DinD entrypoint exposes an unauthenticated TCP daemon" >&2
+  exit 1
+fi
 chmod +x "$PROJECT_DIR/scripts/dind-run.sh"
 touch "$PROJECT_DIR/scripts/setup.sh"
 touch "$PROJECT_DIR/scripts/dind/Dockerfile"
@@ -44,8 +48,11 @@ DIND_DEFAULT_ADDRESS_POOLS="base=10.200.0.0/13,size=21;base=172.16.0.0/12,size=2
 EOF
 
 LOG="$TMP_DIR/docker.log"
+DOCKER_ACTION_LOG="$TMP_DIR/docker-actions.log"
+export DOCKER_ACTION_LOG
 cat > "$TMP_DIR/bin/docker" <<'MOCK'
 #!/usr/bin/env bash
+printf '%s\n' "$*" >> "$DOCKER_ACTION_LOG"
 printf 'docker'
 for arg in "$@"; do
   printf ' <%s>' "$arg"
@@ -129,7 +136,21 @@ if PATH="$TMP_DIR/existing-bin:$PATH" \
   exit 1
 fi
 grep -q -- 'uses a different runner image' "$STALE_LOG"
-grep -q -- 'rerun with DIND_RESET=1' "$STALE_LOG"
+grep -q -- 'rerun with DIND_RECREATE=1' "$STALE_LOG"
+
+RECREATE_LOG="$TMP_DIR/recreate.log"
+: > "$DOCKER_ACTION_LOG"
+PATH="$TMP_DIR/bin:$PATH" \
+DIND_RECREATE=1 \
+DIND_BOOTSTRAP=skip \
+"$PROJECT_DIR/scripts/dind-run.sh" \
+  --taskset terminalbench21 --agent claude-code --workers 1 \
+  > "$RECREATE_LOG"
+grep -q -- '^rm -f sii-agent-fleet-dind$' "$DOCKER_ACTION_LOG"
+if grep -q -- '^volume rm ' "$DOCKER_ACTION_LOG"; then
+  echo "DIND_RECREATE removed the Docker storage volume" >&2
+  exit 1
+fi
 
 FALLBACK_LOG="$TMP_DIR/fallback.log"
 PATH="$TMP_DIR/bin:$PATH" \

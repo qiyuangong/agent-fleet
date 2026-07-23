@@ -14,6 +14,8 @@ make_runner() {
 #!/usr/bin/env bash
 if [[ "\${3:-}" == "harbor" ]]; then
   printf '%s\n' '$harbor_version'
+elif [[ "\$#" == 2 ]]; then
+  printf '%s\n' '3.12.13'
 else
   printf '%s\n' '$opik_version'
 fi

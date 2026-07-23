@@ -35,6 +35,7 @@ validate_runner() {
   HARBOR_OPIK_BIN="$runner_dir/bin/opik" \
   HARBOR_CLI_BIN="$runner_dir/bin/harbor" \
   HARBOR_OPIK_PYTHON="$runner_dir/bin/python" \
+  HARBOR_RUNNER_PYTHON_VERSION="$HARBOR_RUNNER_PYTHON" \
   HARBOR_RUNNER_REQUIREMENTS="$HARBOR_RUNNER_REQUIREMENTS" \
     python3 "$HARBOR_RUNNER_VALIDATOR" --validate
 }

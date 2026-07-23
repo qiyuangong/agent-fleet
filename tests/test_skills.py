@@ -29,14 +29,6 @@ EXPECTED_SKILLS = {
             "Agents/Openclaw/scripts/setup.sh",
         ],
     },
-    "tui-dashboard-deployment": {
-        "description": "Use when deploying or debugging this repository's TUI dashboard, Nginx gateway, or per-host zellij discovery scripts.",
-        "paths": [
-            "TUI/deploy/deploy-agent.sh",
-            "TUI/deploy/deploy-gateway.sh",
-            "TUI/Nginx/scripts/zellij_web_show.example-host-*.sh",
-        ],
-    },
 }
 
 

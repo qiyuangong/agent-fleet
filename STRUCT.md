@@ -1,6 +1,7 @@
 # Repository Structure
 
-SII Agent Fleet separates runnable agents, task assets, and TUI deployment code so each part can be used independently.
+SII Agent Fleet separates runnable agents and task assets so each part can be
+used independently.
 
 ```text
 sii-agent-fleet/
@@ -17,10 +18,6 @@ sii-agent-fleet/
 │   ├── SWE-smith/             # SWE-Smith task list
 │   ├── Terminal-bench-2/      # Terminal-Bench task lists
 │   └── SETA/                  # SETA task lists
-├── TUI/
-│   ├── deploy/                # Agent and gateway deployment scripts
-│   ├── Dashboard/             # Dashboard static assets
-│   └── Nginx/                 # Nginx config and zellij discovery script
 ```
 
 ## Design
@@ -28,8 +25,6 @@ sii-agent-fleet/
 `Agents/` owns execution. Agent-specific code stays under its own directory, while shared Harbor orchestration lives under `Agents/utils/common/Harbor/`.
 
 `Tasks/` owns benchmark and task inputs. Harbor and OpenClaw runners read task lists from here instead of duplicating task files inside agent directories.
-
-`TUI/` owns operator-facing deployment assets. It deploys the dashboard gateway and the per-machine zellij discovery service.
 
 ## Cross-Directory Calls
 
@@ -41,8 +36,6 @@ Harbor common resolves the repository root from `Agents/utils/common/Harbor/env.
 - `HARBOR_OPENCODE_DIR=$AGENTS_DIR/Harbor-opencode`
 
 OpenClaw benchmark runners call `Agents/Openclaw` for fleet setup and Docker Compose, then use task-specific code under `Tasks/Pinchbench` or `Tasks/clawBio`.
-
-TUI deployment scripts read `TUI/Dashboard`, `TUI/Nginx/config`, and `TUI/Nginx/scripts` directly.
 
 Opik tracing code is linked as a Git submodule at
 `third_party/sii-opik-plugin`, pinned to tag `v0.1.0`.

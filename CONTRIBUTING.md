@@ -29,8 +29,8 @@ commands you actually ran. The expected bar:
 - `bash -n <script>` syntax-checks every shell script you touched.
 - Run the affected `unittest` suite(s) — tests live next to each subsystem
   (`Agents/utils/common/Harbor/tests/`, `Agents/Openclaw/tests/`,
-  `Tasks/Pinchbench/tests/`, `Tasks/clawBio/tests/`, `TUI/tests/`); commands are
-  in the nested `AGENTS.md` files.
+  `Tasks/Pinchbench/tests/`, `Tasks/clawBio/tests/`); commands are in the nested
+  `AGENTS.md` files.
 - Verify any paths/links you reference actually exist.
 - Scan your changed files for leaked secrets before pushing (see Security
   below).

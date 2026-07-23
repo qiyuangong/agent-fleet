@@ -18,7 +18,6 @@ description: Use when ...
 | `openclaw-fleet-operations` | Generating, scaling, operating, or debugging the Dockerized OpenClaw gateway fleet. |
 | `openclaw-benchmark-runners` | Running PinchBench or ClawBio benchmarks against an OpenClaw gateway fleet. |
 | `harbor-benchmark-runner` | Configuring, launching, monitoring, or debugging Harbor benchmark runs for Claude Code or OpenCode. |
-| `tui-dashboard-deployment` | Deploying or debugging the TUI dashboard, Nginx gateway, or per-host zellij discovery scripts. |
 
 ## Usage Examples
 
@@ -38,11 +37,6 @@ current OpenClaw fleet and summarize pass/fail counts.
 ```text
 Use harbor-benchmark-runner to run 3 SETA Harbor tasks with AGENT=claude-code,
 TOTAL_WORKERS=3, TB_N_CONCURRENT=3, and inspect online-analysis results.
-```
-
-```text
-Use tui-dashboard-deployment to deploy the dashboard gateway to gateway-host
-with a private DASHBOARD_CONFIG file and report the validation command.
 ```
 
 You can also combine skills for end-to-end validation:
@@ -69,8 +63,7 @@ mkdir -p "$CODEX_SKILLS_DIR"
 for skill in \
   harbor-benchmark-runner \
   openclaw-fleet-operations \
-  openclaw-benchmark-runners \
-  tui-dashboard-deployment
+  openclaw-benchmark-runners
 do
   ln -sfn "$PWD/skills/$skill" "$CODEX_SKILLS_DIR/$skill"
 done
@@ -87,8 +80,7 @@ mkdir -p "$CLAUDE_PLUGIN_DIR/.claude-plugin"
 for skill in \
   harbor-benchmark-runner \
   openclaw-fleet-operations \
-  openclaw-benchmark-runners \
-  tui-dashboard-deployment
+  openclaw-benchmark-runners
 do
   ln -sfn "$PWD/skills/$skill" "$CLAUDE_PLUGIN_DIR/$skill"
 done
@@ -98,12 +90,11 @@ cat > "$CLAUDE_PLUGIN_DIR/.claude-plugin/plugin.json" <<'JSON'
   "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
   "name": "sii-agent-fleet",
   "version": "0.1.0",
-  "description": "SII Agent Fleet operation skills for Harbor, OpenClaw, benchmarks, and TUI deployment.",
+  "description": "SII Agent Fleet operation skills for Harbor, OpenClaw, and benchmarks.",
   "skills": [
     "./harbor-benchmark-runner",
     "./openclaw-fleet-operations",
-    "./openclaw-benchmark-runners",
-    "./tui-dashboard-deployment"
+    "./openclaw-benchmark-runners"
   ]
 }
 JSON
@@ -127,8 +118,7 @@ mkdir -p "$RUNTIME_SKILLS_DIR"
 for skill in \
   harbor-benchmark-runner \
   openclaw-fleet-operations \
-  openclaw-benchmark-runners \
-  tui-dashboard-deployment
+  openclaw-benchmark-runners
 do
   ln -sfn "$PWD/skills/$skill" "$RUNTIME_SKILLS_DIR/$skill"
 done

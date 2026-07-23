@@ -278,7 +278,6 @@ SKILLS=(
   harbor-benchmark-runner
   openclaw-fleet-operations
   openclaw-benchmark-runners
-  tui-dashboard-deployment
 )
 for skill in "${SKILLS[@]}"; do
   if [[ -d "$REPO_DIR/skills/$skill" ]]; then
@@ -292,12 +291,11 @@ cat > "$CLAUDE_PLUGIN_DIR/.claude-plugin/plugin.json" <<'JSON'
   "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
   "name": "sii-agent-fleet",
   "version": "0.1.0",
-  "description": "SII Agent Fleet operation skills for Harbor, OpenClaw, benchmarks, and TUI deployment.",
+  "description": "SII Agent Fleet operation skills for Harbor, OpenClaw, and benchmarks.",
   "skills": [
     "./harbor-benchmark-runner",
     "./openclaw-fleet-operations",
-    "./openclaw-benchmark-runners",
-    "./tui-dashboard-deployment"
+    "./openclaw-benchmark-runners"
   ]
 }
 JSON

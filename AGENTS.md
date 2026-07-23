@@ -1,15 +1,14 @@
 # AGENTS.md — SII Agent Fleet
 
 Guidance for coding agents working in this repository. Subsystem runbooks
-live in [Agents/AGENTS.md](Agents/AGENTS.md), [Tasks/AGENTS.md](Tasks/AGENTS.md),
-and [TUI/AGENTS.md](TUI/AGENTS.md).
+live in [Agents/AGENTS.md](Agents/AGENTS.md) and
+[Tasks/AGENTS.md](Tasks/AGENTS.md).
 
 ## What This Repo Is
 
 Runnable agent integrations and benchmark assets for agent evaluation:
 Harbor-based benchmark runs (Claude Code, OpenCode), a Dockerized OpenClaw
-gateway fleet with its benchmarks (PinchBench, ClawBio), and TUI/dashboard
-deployment for operating fleets.
+gateway fleet, and its benchmarks (PinchBench, ClawBio).
 
 ## Map
 
@@ -19,7 +18,6 @@ deployment for operating fleets.
 | `Agents/Harbor-claude-code/`, `Agents/Harbor-opencode/` | Agent-specific Harbor integration | per-directory `STRUCT.md` |
 | `Agents/Openclaw/` | Dockerized OpenClaw gateway fleet | `Agents/AGENTS.md` |
 | `Tasks/` | Harbor task lists; PinchBench and ClawBio runners | `Tasks/AGENTS.md` |
-| `TUI/` | Dashboard, gateway, and discovery deployment | `TUI/AGENTS.md` |
 | `third_party/sii-opik-plugin/` | Opik tracing plugin (git submodule, tag `v0.1.0`) | — |
 
 ## First-Time Setup
@@ -49,9 +47,8 @@ cp config.env config.local.env            # put real values in the local copy
   - `$CONFIG_BASE/<N>/openclaw.json` (default `~/openclaw-instances/<N>/`)
 - Every shell script uses `set -euo pipefail`; keep that in new scripts.
 - Tests live next to each subsystem (`Agents/Openclaw/tests/`,
-  `Tasks/Pinchbench/tests/`, `Tasks/clawBio/tests/`, `TUI/tests/`). Run the
-  affected suite before committing — commands are in the nested AGENTS.md
-  files.
+  `Tasks/Pinchbench/tests/`, `Tasks/clawBio/tests/`). Run the affected suite
+  before committing — commands are in the nested AGENTS.md files.
 
 ## Pull Requests
 

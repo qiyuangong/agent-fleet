@@ -11,9 +11,20 @@ mkdir -p \
   "$PROJECT_DIR/Agents/utils/common/Harbor" \
   "$TMP_DIR/bin"
 cp "$REPO_ROOT/scripts/dind-run.sh" "$PROJECT_DIR/scripts/dind-run.sh"
-sed -i \
-  '0,/if running_in_container; then/s//if [[ "${DIND_TEST_ASSUME_HOST:-0}" != "1" ]] \&\& running_in_container; then/' \
-  "$PROJECT_DIR/scripts/dind-run.sh"
+# First-occurrence rewrite via python: GNU sed's -i and 0,/re/ addressing
+# are unavailable in the BSD sed shipped on macOS.
+python3 - "$PROJECT_DIR/scripts/dind-run.sh" <<'PY'
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+old = "if running_in_container; then"
+new = 'if [[ "${DIND_TEST_ASSUME_HOST:-0}" != "1" ]] && running_in_container; then'
+if old not in text:
+    sys.exit("test guard patch point not found in dind-run.sh")
+path.write_text(text.replace(old, new, 1), encoding="utf-8")
+PY
 cp "$REPO_ROOT/scripts/dind/dockerd-entrypoint.sh" "$PROJECT_DIR/scripts/dind/dockerd-entrypoint.sh"
 cp "$REPO_ROOT/scripts/run_fleet.sh" "$PROJECT_DIR/scripts/run_fleet.sh"
 cp "$REPO_ROOT/scripts/fleet_spec_io.sh" "$PROJECT_DIR/scripts/fleet_spec_io.sh"
@@ -151,6 +162,26 @@ if grep -q -- '^volume rm ' "$DOCKER_ACTION_LOG"; then
   echo "DIND_RECREATE removed the Docker storage volume" >&2
   exit 1
 fi
+
+PATH="$TMP_DIR/bin:$PATH" \
+DIND_BOOTSTRAP=missing \
+PI_VERSION=0.81.1 \
+"$PROJECT_DIR/scripts/dind-run.sh" --taskset terminalbench21 --agent claude-code --workers 1 > "$LOG"
+
+grep -qF -- '<sh> <-c> <command -v pi >/dev/null 2>&1 && [ "$(pi --version 2>/dev/null | grep -oE "[0-9]+\.[0-9]+\.[0-9]+" | head -n 1)" = "$3" ] && test -f "$1" && test -d "$2">' "$LOG"
+grep -q -- '</home/sii/.pi/agent/models.json>' "$LOG"
+grep -q -- '</home/sii/.pi/agent/skills/harbor-benchmark-runner>' "$LOG"
+grep -q -- '<0.81.1>' "$LOG"
+grep -q -- '<PI_VERSION=0.81.1>' "$LOG"
+if grep -q -- 'command -v claude' "$LOG"; then
+  echo "dind-run.sh still checks the controller for Claude Code" >&2
+  exit 1
+fi
+if grep -q -- '<./scripts/setup.sh>' "$LOG"; then
+  echo "dind-run.sh bootstrapped despite a complete Pi controller setup" >&2
+  exit 1
+fi
+grep -q -- '<./scripts/run_fleet.sh> <--taskset> <terminalbench21> <--agent> <claude-code> <--workers> <1>' "$LOG"
 
 FALLBACK_LOG="$TMP_DIR/fallback.log"
 PATH="$TMP_DIR/bin:$PATH" \

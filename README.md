@@ -13,13 +13,15 @@ evaluating Claude Code, OpenCode, and OpenClaw.
 
 Install tmux with your package manager and install Zellij from its
 [releases page](https://github.com/zellij-org/zellij/releases). `setup.sh`
-below installs Node.js and Claude Code for you.
+below installs Node.js and Pi for the control-plane Prompt workflow. Harbor
+task containers still install and run the selected benchmark agent, including
+Claude Code.
 
 ### 2. Clone the repository
 
 ```bash
-git clone --recurse-submodules https://github.com/sii-system/sii-agent-fleet.git
-cd sii-agent-fleet
+git clone --recurse-submodules https://github.com/sii-system/agent-fleet.git
+cd agent-fleet
 ```
 
 ### 3. Configure and set up
@@ -40,7 +42,7 @@ REPO_DIR="$PWD" ./scripts/setup.sh
 ```
 
 `REPO_DIR="$PWD"` points setup at this checkout instead of its default
-`$HOME/sii-agent-fleet` clone.
+`$HOME/agent-fleet` clone.
 
 ### 4. Run one benchmark
 

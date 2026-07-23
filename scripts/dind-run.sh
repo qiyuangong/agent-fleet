@@ -375,7 +375,7 @@ declare -a run_env=(
   "HOME=$DIND_HOME_DIR"
 )
 run_env+=("${proxy_env[@]}")
-for optional in TRACE_TO_OPIK OPIK_URL OPIK_API_KEY OPIK_WORKSPACE OPIK_PROJECT_NAME CLAUDE_TGZ_SOURCE CLAUDE_WHEEL_DIR_SOURCE TB_CC_CLAUDE_TGZ_SOURCE TB_CC_PY_WHEEL_DIR_SOURCE; do
+for optional in PI_VERSION TRACE_TO_OPIK OPIK_URL OPIK_API_KEY OPIK_WORKSPACE OPIK_PROJECT_NAME CLAUDE_TGZ_SOURCE CLAUDE_WHEEL_DIR_SOURCE TB_CC_CLAUDE_TGZ_SOURCE TB_CC_PY_WHEEL_DIR_SOURCE; do
   if [[ -n "${!optional:-}" ]]; then
     run_env+=("$optional=${!optional}")
   fi
@@ -403,7 +403,13 @@ case "$DIND_BOOTSTRAP" in
     run_setup=1
     ;;
   missing)
-    if ! docker_exec sh -c 'command -v claude >/dev/null 2>&1 && test -d "$1"' sh "$DIND_HOME_DIR/.claude/skills/sii-agent-fleet"; then
+    # Extract the version number instead of matching the whole output line:
+    # setup.sh does the same, and an exact-line match would re-run setup on
+    # every invocation if `pi --version` ever prints more than the bare version.
+    if ! docker_exec sh -c 'command -v pi >/dev/null 2>&1 && [ "$(pi --version 2>/dev/null | grep -oE "[0-9]+\.[0-9]+\.[0-9]+" | head -n 1)" = "$3" ] && test -f "$1" && test -d "$2"' \
+      sh "$DIND_HOME_DIR/.pi/agent/models.json" \
+      "$DIND_HOME_DIR/.pi/agent/skills/harbor-benchmark-runner" \
+      "${PI_VERSION:-0.81.1}"; then
       run_setup=1
     fi
     ;;

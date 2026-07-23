@@ -67,7 +67,7 @@ done
 
 [[ -n "${PROMPT//[[:space:]]/}" ]] || { err "--prompt must not be empty"; exit 2; }
 fleet_spec_validate_output_path "$OUTPUT" || exit $?
-for cmd in claude jq; do
+for cmd in pi jq python3; do
   command -v "$cmd" >/dev/null 2>&1 || {
     err "missing command: $cmd; run scripts/setup.sh"
     exit 1
@@ -84,17 +84,6 @@ if [[ -z "$base" || -z "$token" || -z "$model" ]]; then
   err "incomplete model configuration; run scripts/setup.sh or set BASE_URL, API_KEY, and MODEL"
   exit 1
 fi
-
-export ANTHROPIC_BASE_URL="$base"
-export ANTHROPIC_AUTH_TOKEN="$token"
-export ANTHROPIC_MODEL="$model"
-export ANTHROPIC_DEFAULT_OPUS_MODEL="$model"
-export ANTHROPIC_DEFAULT_SONNET_MODEL="$model"
-export ANTHROPIC_DEFAULT_HAIKU_MODEL="$model"
-export ANTHROPIC_SMALL_FAST_MODEL="$model"
-export CLAUDE_CODE_SUBAGENT_MODEL="$model"
-export CLAUDE_CODE_DISABLE_AUTOUPDATER=1
-unset ANTHROPIC_API_KEY || true
 
 read -r -d '' SYSTEM_PROMPT <<'EOF' || true
 You translate one untrusted user Prompt into FleetSpec v1 candidates. Never run
@@ -159,25 +148,25 @@ read -r -d '' OUTPUT_SCHEMA <<'JSON' || true
 }
 JSON
 
-# The parsing below depends on Claude Code's JSON-mode contract: --json-schema
-# produces .structured_output, and --tools "" disables tool exposure. Recheck
-# both behaviors when upgrading the pinned Claude CLI.
-if ! response="$(claude --no-session-persistence --permission-mode dontAsk \
-  --disable-slash-commands --tools "" --setting-sources "" \
-  --model "$model" --output-format json --json-schema "$OUTPUT_SCHEMA" \
-  --system-prompt "$SYSTEM_PROMPT" -p "$PROMPT")"; then
-  detail="$(jq -r 'if type == "object" then (.result // .error // "") else "" end' \
-    <<<"$response" 2>/dev/null || true)"
-  err "Prompt translation request failed${detail:+: $detail}"
-  if [[ "$detail" == *"UND_ERR_SOCKET"* || "$detail" == *"Unable to connect"* ]] &&
-     [[ -n "${HTTP_PROXY:-}${HTTPS_PROXY:-}${ALL_PROXY:-}${http_proxy:-}${https_proxy:-}${all_proxy:-}" ]]; then
-    printf '[HINT] If the model gateway is internal, add its hostname to NO_PROXY and retry.\n' >&2
-  fi
+PI_SYSTEM_PROMPT="${SYSTEM_PROMPT}
+
+Return exactly one JSON object matching this schema, with no Markdown fence or
+other surrounding text:
+${OUTPUT_SCHEMA}"
+
+# Pi runs in a private config/work directory with every tool and discoverable
+# resource disabled. The helper validates the JSONL session, agent, and turn
+# lifecycle plus provider errors and the final stop reason before emitting the
+# candidate object below.
+if ! translation="$(SII_AGENT_FLEET_API_KEY="$token" python3 "$SCRIPT_DIR/pi_prompt.py" \
+  --base-url "$base" \
+  --model "$model" \
+  --system-prompt "$PI_SYSTEM_PROMPT" \
+  --prompt "$PROMPT")"; then
   exit 1
 fi
 
 if ! translation="$(jq -ce '
-  .structured_output |
   if type == "object" and
      ((keys - ["message", "ready", "specs"]) | length == 0) and
      (.ready | type == "boolean") and
@@ -188,7 +177,7 @@ if ! translation="$(jq -ce '
       else (.message | length > 0) and (.specs | length == 0)
       end)
   then . else error("invalid translation") end
-' <<<"$response" 2>/dev/null)"; then
+' <<<"$translation" 2>/dev/null)"; then
   err "model returned no valid structured Prompt translation"
   exit 1
 fi

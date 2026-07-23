@@ -18,9 +18,9 @@ SOURCE_REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # ---- Hardcoded versions (override via env if needed) ----
 NODE_VERSION="${NODE_VERSION:-24}"
-CLAUDE_CODE_VERSION="${CLAUDE_CODE_VERSION:-2.1.90}"
-REPO_URL="${REPO_URL:-https://github.com/sii-system/sii-agent-fleet.git}"
-REPO_DIR="${REPO_DIR:-$HOME/sii-agent-fleet}"
+PI_VERSION="${PI_VERSION:-0.81.1}"
+REPO_URL="${REPO_URL:-https://github.com/sii-system/agent-fleet.git}"
+REPO_DIR="${REPO_DIR:-$HOME/agent-fleet}"
 
 # ---- 1. Gather config (env vars first, then interactive prompt) ----
 # Credentials: BASE_URL / MODEL come from env vars, or are prompted
@@ -78,8 +78,14 @@ if [[ ${#MISSING[@]} -gt 0 ]]; then
 fi
 ok "Base dependencies present (git / curl / jq / docker / python3)"
 
-# ---- 3. Ensure Node >=18 (via nvm if needed) ----
-node_major() { node -v 2>/dev/null | sed -E 's/^v([0-9]+).*/\1/' || echo 0; }
+# ---- 3. Ensure Node >=22.19 (via nvm if needed) ----
+node_version_ok() {
+  local version major minor
+  version="${1#v}"
+  IFS=. read -r major minor _ <<<"$version"
+  [[ "$major" =~ ^[0-9]+$ && "$minor" =~ ^[0-9]+$ ]] || return 1
+  (( major > 22 || (major == 22 && minor >= 19) ))
+}
 load_nvm() {
   export NVM_DIR="$HOME/.nvm"
   [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
@@ -92,9 +98,9 @@ load_nvm() {
 load_nvm
 NEED_NODE=1
 if command -v node >/dev/null 2>&1; then
-  CUR_MAJOR="$(node_major)"
-  if [[ "$CUR_MAJOR" -ge 18 ]]; then
-    ok "Node $(node -v) OK (>=18)"
+  CUR_NODE_VERSION="$(node -v 2>/dev/null || true)"
+  if node_version_ok "$CUR_NODE_VERSION"; then
+    ok "Node $CUR_NODE_VERSION OK (>=22.19)"
     NEED_NODE=0
   else
     warn "Node $(node -v) too old, will install Node $NODE_VERSION via nvm"
@@ -110,18 +116,18 @@ if [[ "$NEED_NODE" == "1" ]]; then
     load_nvm
   fi
   if ! command -v nvm >/dev/null 2>&1; then
-    err "nvm install/load failed. Please install Node >=18 manually and re-run."
+    err "nvm install/load failed. Please install Node >=22.19 manually and re-run."
     exit 1
   fi
   info "Installing Node $NODE_VERSION via nvm..."
   nvm install "$NODE_VERSION"
   nvm use "$NODE_VERSION"
   nvm alias default "$NODE_VERSION" || true
-  CUR_MAJOR="$(node_major)"
-  if [[ "$CUR_MAJOR" -ge 18 ]]; then
-    ok "Node $(node -v) ready"
+  CUR_NODE_VERSION="$(node -v 2>/dev/null || true)"
+  if node_version_ok "$CUR_NODE_VERSION"; then
+    ok "Node $CUR_NODE_VERSION ready"
   else
-    err "Node still <18 after install, aborting."
+    err "Node still <22.19 after install, aborting."
     exit 1
   fi
 fi
@@ -131,62 +137,96 @@ if ! command -v npm >/dev/null 2>&1; then
   exit 1
 fi
 
-# ---- 4. Install Claude Code ----
-info "Checking Claude Code version..."
-export CLAUDE_CODE_DISABLE_AUTOUPDATER=1
+# ---- 4. Install Pi for control-plane use ----
+info "Checking Pi version..."
 NEED_INSTALL=1
-if command -v claude >/dev/null 2>&1; then
-  CUR_VER="$(claude --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || true)"
-  if [[ "$CUR_VER" == "$CLAUDE_CODE_VERSION" ]]; then
-    ok "Claude Code already at target version $CLAUDE_CODE_VERSION"
+if command -v pi >/dev/null 2>&1; then
+  CUR_VER="$(pi --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
+  if [[ "$CUR_VER" == "$PI_VERSION" ]]; then
+    ok "Pi already at target version $PI_VERSION"
     NEED_INSTALL=0
   else
-    warn "Current version ${CUR_VER:-unknown}, switching to $CLAUDE_CODE_VERSION"
+    warn "Current Pi version ${CUR_VER:-unknown}, switching to $PI_VERSION"
   fi
 else
-  warn "Claude Code not found, installing $CLAUDE_CODE_VERSION"
+  warn "Pi not found, installing $PI_VERSION"
 fi
 if [[ "$NEED_INSTALL" == "1" ]]; then
-  info "Installing Claude Code @${CLAUDE_CODE_VERSION}..."
-  npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" --force
+  info "Installing Pi @${PI_VERSION}..."
+  npm install -g --ignore-scripts "@earendil-works/pi-coding-agent@${PI_VERSION}" --force
   hash -r
-  ok "Claude Code ${CLAUDE_CODE_VERSION} installed"
-  info "Override pinned version via CLAUDE_CODE_VERSION env var if a newer release is required"
+  CUR_VER="$(pi --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
+  if [[ "$CUR_VER" != "$PI_VERSION" ]]; then
+    err "Pi install did not provide target version $PI_VERSION (got ${CUR_VER:-unknown})"
+    exit 1
+  fi
+  ok "Pi ${PI_VERSION} installed"
+  info "Override pinned version via PI_VERSION only after verifying compatibility"
 fi
 
-# ---- 5. Merge managed keys into ~/.claude/settings.json ----
-info "Merging managed keys into ~/.claude/settings.json..."
-mkdir -p "$HOME/.claude"
-SETTINGS="$HOME/.claude/settings.json"
-cp -f "$SETTINGS" "$SETTINGS.bak.sii-agent-fleet" 2>/dev/null || true
-python3 - "$SETTINGS" "$MODEL" <<'PY'
+# ---- 5. Merge the managed Pi provider and settings ----
+info "Merging managed Pi configuration..."
+PI_AGENT_DIR="$HOME/.pi/agent"
+mkdir -p "$PI_AGENT_DIR"
+PI_SETTINGS="$PI_AGENT_DIR/settings.json"
+PI_MODELS="$PI_AGENT_DIR/models.json"
+cp -f "$PI_SETTINGS" "$PI_SETTINGS.bak.sii-agent-fleet" 2>/dev/null || true
+cp -f "$PI_MODELS" "$PI_MODELS.bak.sii-agent-fleet" 2>/dev/null || true
+python3 - "$PI_SETTINGS" "$PI_MODELS" "$BASE_URL" "$MODEL" "$SCRIPT_DIR" <<'PY'
 import json, sys
-path, model = sys.argv[1], sys.argv[2]
+settings_path, models_path, base_url, model, script_dir = sys.argv[1:]
+sys.path.insert(0, script_dir)
+from pi_prompt import PromptFailure, models_config, normalized_base_url
+
+def load_object(path):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            value = json.load(f)
+        if isinstance(value, dict):
+            return value
+    except FileNotFoundError:
+        pass
+    except json.JSONDecodeError:
+        print(
+            f"\033[1;33m[WARN]\033[0m existing {path} could not be parsed; "
+            f"backed up at {path}.bak.sii-agent-fleet, writing fresh",
+            file=sys.stderr,
+        )
+    return {}
+
+settings = load_object(settings_path)
+settings["defaultProvider"] = "sii-gateway"
+settings["defaultModel"] = model
+settings.setdefault("defaultThinkingLevel", "high")
+settings.setdefault("theme", "dark")
+settings.setdefault("enableInstallTelemetry", False)
+
+models = load_object(models_path)
+providers = models.get("providers")
+if not isinstance(providers, dict):
+    providers = {}
+    models["providers"] = providers
 try:
-    with open(path, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    if not isinstance(data, dict):
-        data = {}
-except FileNotFoundError:
-    data = {}
-except json.JSONDecodeError:
-    print(f"\033[1;33m[WARN]\033[0m existing settings.json could not be parsed; backed up at {path}.bak.sii-agent-fleet, writing fresh", file=sys.stderr)
-    data = {}
-data["model"] = model
-data.setdefault("effortLevel", "high")
-data.setdefault("theme", "dark")
-with open(path, "w", encoding="utf-8") as f:
-    json.dump(data, f, indent=2)
-    f.write("\n")
+    normalized_url = normalized_base_url(base_url)
+except PromptFailure as exc:
+    print(f"\033[1;31m[FAIL]\033[0m {exc}", file=sys.stderr)
+    raise SystemExit(1) from exc
+providers["sii-gateway"] = models_config(
+    normalized_url, model, display_name="SII Agent Fleet"
+)["providers"]["sii-gateway"]
+
+for path, value in ((settings_path, settings), (models_path, models)):
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(value, f, indent=2)
+        f.write("\n")
 PY
-ok "settings.json merged (model=${MODEL}); backup at ${SETTINGS}.bak.sii-agent-fleet"
+ok "Pi configuration merged (provider=sii-gateway, model=${MODEL})"
 
 # ---- 6. Write env vars + nvm init to ~/.bashrc (idempotent) ----
 # Uses Python to replace the managed block portably (GNU/BSD sed differ).
 info "Writing env vars to ~/.bashrc..."
 BASHRC="$HOME/.bashrc"
 cp -f "$BASHRC" "$BASHRC.bak.sii-agent-fleet" 2>/dev/null || true
-BASE_URL="$BASE_URL" \
 AUTH_TOKEN="$AUTH_TOKEN" \
 CLAUDE_TGZ_SOURCE="$CLAUDE_TGZ_SOURCE" \
 CLAUDE_WHEEL_DIR_SOURCE="$CLAUDE_WHEEL_DIR_SOURCE" \
@@ -196,7 +236,6 @@ import os, shlex
 from pathlib import Path
 
 bashrc = Path(os.environ["BASHRC"])
-base_url = os.environ["BASE_URL"]
 auth_token = os.environ["AUTH_TOKEN"]
 tgz = os.environ.get("CLAUDE_TGZ_SOURCE", "").strip()
 wheel = os.environ.get("CLAUDE_WHEEL_DIR_SOURCE", "").strip()
@@ -228,10 +267,8 @@ block = [
     BEGIN,
     'export NVM_DIR="$HOME/.nvm"',
     '[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"',
-    "export CLAUDE_CODE_DISABLE_AUTOUPDATER=1",
-    f"export ANTHROPIC_BASE_URL={q(base_url)}",
-    f"export ANTHROPIC_AUTH_TOKEN={q(auth_token)}",
-    "unset ANTHROPIC_API_KEY",
+    "export PI_OFFLINE=1",
+    f"export SII_AGENT_FLEET_API_KEY={q(auth_token)}",
 ]
 if tgz and wheel:
     block += [
@@ -246,9 +283,8 @@ bashrc.write_text("\n".join(out) + "\n", encoding="utf-8")
 PY
 ok "Env vars written to ~/.bashrc (idempotent); backup at ${BASHRC}.bak.sii-agent-fleet"
 
-export ANTHROPIC_BASE_URL="${BASE_URL}"
-export ANTHROPIC_AUTH_TOKEN="${AUTH_TOKEN}"
-unset ANTHROPIC_API_KEY || true
+export PI_OFFLINE=1
+export SII_AGENT_FLEET_API_KEY="${AUTH_TOKEN}"
 if [[ -n "${CLAUDE_TGZ_SOURCE:-}" && -n "${CLAUDE_WHEEL_DIR_SOURCE:-}" ]]; then
   export TB_CC_OPIK_ENABLE_HOOK=1
   export TB_CC_CLAUDE_TGZ_SOURCE="${CLAUDE_TGZ_SOURCE}"
@@ -286,10 +322,10 @@ case "${HARBOR_RUNNER_SETUP:-1}" in
     ;;
 esac
 
-# ---- 9. Install skills plugin ----
-info "Installing skills plugin..."
-CLAUDE_PLUGIN_DIR="$HOME/.claude/skills/sii-agent-fleet"
-mkdir -p "$CLAUDE_PLUGIN_DIR/.claude-plugin"
+# ---- 9. Install Pi skills ----
+info "Installing Pi skills..."
+PI_SKILLS_DIR="$PI_AGENT_DIR/skills"
+mkdir -p "$PI_SKILLS_DIR"
 SKILLS=(
   harbor-benchmark-runner
   openclaw-fleet-operations
@@ -297,25 +333,12 @@ SKILLS=(
 )
 for skill in "${SKILLS[@]}"; do
   if [[ -d "$REPO_DIR/skills/$skill" ]]; then
-    ln -sfn "$REPO_DIR/skills/$skill" "$CLAUDE_PLUGIN_DIR/$skill"
+    ln -sfn "$REPO_DIR/skills/$skill" "$PI_SKILLS_DIR/$skill"
   else
     warn "skill dir not found: $REPO_DIR/skills/$skill"
   fi
 done
-cat > "$CLAUDE_PLUGIN_DIR/.claude-plugin/plugin.json" <<'JSON'
-{
-  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
-  "name": "sii-agent-fleet",
-  "version": "0.1.0",
-  "description": "SII Agent Fleet operation skills for Harbor, OpenClaw, and benchmarks.",
-  "skills": [
-    "./harbor-benchmark-runner",
-    "./openclaw-fleet-operations",
-    "./openclaw-benchmark-runners"
-  ]
-}
-JSON
-ok "Skills plugin installed to $CLAUDE_PLUGIN_DIR"
+ok "Pi skills installed to $PI_SKILLS_DIR"
 
 # ---- 10. Merge managed keys into config.local.env ----
 # Update only the keys setup.sh manages (BASE_URL/API_KEY/MODEL + tracing/Opik),

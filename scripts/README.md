@@ -2,7 +2,7 @@
 
 | Script | Purpose |
 | --- | --- |
-| `setup.sh` | One-shot environment bootstrap: installs Node, Claude Code, and the pinned host Harbor runner; writes config and installs skills |
+| `setup.sh` | One-shot control-plane bootstrap: installs Node, Pi, and the pinned host Harbor runner; writes config and installs the Pi skills |
 | `run_fleet.sh` | Routes tasksets to the existing Harbor or OpenClaw runner |
 | `fleet_spec.sh` | Internal dispatcher for validated single- and multi-run spec inputs |
 | `fleet_batch.sh` | Internal concurrent launcher for normalized multi-run inputs |
@@ -30,7 +30,9 @@ MODEL=glm-5.1-fp8 \
 ./scripts/setup.sh
 ```
 
-**Prerequisites**: Manually install `git` / `curl` / `jq` / `docker` / `python3`. Node and Claude Code do not need to be pre-installed.
+**Prerequisites**: Manually install `git` / `curl` / `jq` / `docker` /
+`python3`. Node and Pi do not need to be pre-installed. Claude Code remains a
+Harbor task-container dependency and is prepared separately by the runner.
 
 ### Details
 
@@ -39,14 +41,15 @@ MODEL=glm-5.1-fp8 \
 
 1. Gather model endpoint config (interactive prompt or env vars)
 2. Check base dependencies (git / curl / jq / docker / python3)
-3. Install Node.js via nvm (if missing or < 18)
-4. Install Claude Code (pinned to 2.1.90)
-5. Write env vars to `~/.bashrc`
-6. Clone the repo
-7. Create or validate the pinned Harbor/Opik runner environment
-8. Install the skills plugin
-9. Write `config.local.env`
-10. Check Docker permissions
+3. Install Node.js via nvm (if missing or < 22.19)
+4. Install Pi (pinned to 0.81.1)
+5. Merge the `sii-gateway` Pi provider and default model
+6. Write control-plane env vars to `~/.bashrc`
+7. Clone the repo
+8. Create or validate the pinned Harbor/Opik runner environment
+9. Install the Pi skills
+10. Write `config.local.env`
+11. Check Docker permissions
 
 </details>
 
@@ -54,7 +57,9 @@ MODEL=glm-5.1-fp8 \
 <summary>Idempotency notes</summary>
 
 - `~/.bashrc`: wrapped in a marker block `# >>> sii-agent-fleet env >>>`, the whole block is replaced each run
-- `~/.claude/settings.json`: managed keys are merged, user customizations preserved
+- `~/.pi/agent/settings.json`: the managed provider/model defaults are merged; unrelated settings are preserved
+- `~/.pi/agent/models.json`: only the managed `sii-gateway` provider is replaced; unrelated providers and top-level fields are preserved
+- Existing user-managed Claude Code installations and `~/.claude` data are not removed or modified
 - `config.local.env`: only managed keys (`BASE_URL` / `API_KEY` / `MODEL`, plus `TRACE_TO_OPIK` and `OPIK_*` when set) are updated; comments and other keys are preserved
 - Host Harbor runner: exact direct dependencies come from `runner-requirements.txt`; a valid environment is reused
 - A backup is taken before each modification (`*.bak.sii-agent-fleet`)
@@ -235,11 +240,12 @@ own any resulting resource conflicts and failures.
 
 ### Prompt execution
 
-Prompt mode uses the configured model only to translate natural language into
-one or more FleetSpecs. After local validation succeeds, every result uses the
-same `--spec` path, which automatically selects single- or multi-run execution.
-The model never receives tools and never constructs or executes the runner
-command.
+Prompt mode runs Pi in the control plane and uses the configured model only to
+translate natural language into one or more FleetSpecs. After local validation
+succeeds, every result uses the same `--spec` path, which automatically selects
+single- or multi-run execution. Pi runs with an isolated configuration and no
+tools, sessions, extensions, skills, templates, themes, context files, or
+project trust. It never constructs or executes the runner command.
 
 ```bash
 # Translate, validate, and run immediately.
@@ -287,9 +293,12 @@ unsupported instead of producing a spec that would fail after Harbor starts. A
 Prompt batch may contain at most one OpenClaw run because those runners share
 one fleet; additional OpenClaw runs are rejected before display or output.
 
-Prompt mode never creates or overwrites an output file, and never starts a
-runner, when translation, structured-output validation, FleetSpec validation,
-or clarification fails.
+Prompt mode validates Pi's JSONL session, agent, and turn lifecycle, provider
+errors, final stop reason, and final assistant message. It then treats that
+message as untrusted JSON and applies the existing FleetSpec validation. It
+never creates or overwrites an output file, and never starts a runner, when
+translation, lifecycle validation, FleetSpec validation, or clarification
+fails.
 
 Prompt mode exit codes: `0` — the runner or dry-run succeeded; `2` — invalid CLI
 usage; `3` — the prompt needs clarification or requests an unsupported feature
@@ -426,7 +435,7 @@ When invoked inside a container, the launcher warns and delegates directly to
    (`TRACE_TO_OPIK`, `OPIK_URL`, `OPIK_API_KEY`, `OPIK_WORKSPACE`,
    `OPIK_PROJECT_NAME`), local Claude package paths, and package mirrors.
 7. Run `scripts/setup.sh` inside DinD per `DIND_BOOTSTRAP` (`always` every
-   time, `missing` only when Claude Code or the skills plugin is absent,
+   time, `missing` only when Pi provider configuration or the Pi skills are absent,
    `skip` never).
 8. Run `scripts/run_fleet.sh` inside DinD with the same arguments.
 
@@ -445,7 +454,7 @@ When invoked inside a container, the launcher warns and delegates directly to
 | `DIND_BASE_IMAGE` | pinned Debian 12 slim digest | glibc base image used when building the default image |
 | `DIND_UV_IMAGE` | DaoCloud mirror of `ghcr.io/astral-sh/uv:0.11.28` | Pinned uv image used to install the Harbor runner environment at build time |
 | `DIND_DOCKER_VOLUME` | `<DIND_NAME>-docker` | Persistent `/var/lib/docker` volume for nested image/build cache reuse |
-| `DIND_HOME_VOLUME` | `<DIND_NAME>-home` | Persistent benchmark-user home volume for Claude/plugin setup |
+| `DIND_HOME_VOLUME` | `<DIND_NAME>-home` | Persistent benchmark-user home volume for Pi control-plane configuration and skills |
 | `DIND_USER` | `sii` | Unprivileged user that runs `run_fleet.sh`; must exist in `DIND_IMAGE` |
 | `DIND_HOME_DIR` | `/home/<DIND_USER>` | Home path mounted from `DIND_HOME_VOLUME` |
 | `DIND_USER_UID` / `DIND_USER_GID` | caller's UID / GID | IDs assigned to `DIND_USER` so the mounted checkout stays writable without host-side `chown` |
@@ -458,11 +467,12 @@ When invoked inside a container, the launcher warns and delegates directly to
 ### Caveats
 
 - Requires privileged Docker on the host.
-- The launcher runs as the image's unprivileged `sii` user so Claude Code can
-  use bypass-permissions mode. Setup installs global packages as root, then
-  transfers the benchmark home directory to that user. The wrapper maps that
-  user's UID/GID to the calling host user so it can write result files to the
-  mounted checkout without changing host file ownership.
+- The launcher runs as the image's unprivileged `sii` user. Setup installs Pi
+  globally as root, then transfers the controller home directory to that user.
+  The wrapper maps that user's UID/GID to the calling host user so it can write
+  result files to the mounted checkout without changing host file ownership.
+  Nested Harbor task containers continue to install and run Claude Code when
+  `agent=claude-code` is selected.
 - The default image uses the pinned Debian 12 slim base and bakes in Docker
   Engine plus the Harbor runner environment. Its fingerprint changes
   with the Dockerfile, entrypoint, dependency manifest, or build image references.
@@ -497,7 +507,11 @@ When invoked inside a container, the launcher warns and delegates directly to
 - **Run setup.sh before run_fleet.sh**: setup installs the environment, run_fleet launches the fleet. Skipping setup will almost certainly fail.
 - **Harbor before OpenClaw**: harbor is lighter (single container); openclaw needs 10 containers.
 - **Verify the endpoint after switching models**: after changing `MODEL`, first `curl` the gateway to confirm it responds, then launch the fleet.
-- **Intranet / offline hosts**: setup.sh installs Node.js via nvm and Claude Code via npm, both reaching the public internet. On a network without public access, install Node.js >= 18 manually first. Benchmark containers also pull Claude Code from `downloads.claude.ai` by default; provide a local Claude package at setup time:
+- **Intranet / offline hosts**: setup.sh installs Node.js via nvm and Pi via npm,
+  both reaching the public internet. On a network without public access,
+  install Node.js >= 22.19 and the pinned Pi package manually first. Benchmark
+  containers still pull Claude Code by default; provide a local Claude package
+  at setup time:
   ```bash
   CLAUDE_TGZ_SOURCE=/path/to/claude-code.tgz \
   CLAUDE_WHEEL_DIR_SOURCE=/path/to/wheels/ \

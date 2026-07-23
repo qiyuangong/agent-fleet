@@ -20,6 +20,7 @@ class FleetGoalTest(unittest.TestCase):
         self.bin_dir = self.root / "bin"
         self.repo.mkdir()
         self.bin_dir.mkdir()
+        self.pi_capture = self.bin_dir / "pi-capture.txt"
 
         (self.repo / "config.env").write_text(
             "BASE_URL=https://public.example.invalid\n"
@@ -34,26 +35,35 @@ class FleetGoalTest(unittest.TestCase):
             encoding="utf-8",
         )
 
-        claude = self.bin_dir / "claude"
-        claude.write_text(
+        pi = self.bin_dir / "pi"
+        pi.write_text(
             """#!/usr/bin/env bash
 set -euo pipefail
-if [[ -n "${CLAUDE_STUB_CAPTURE:-}" ]]; then
-  {
-    printf 'base=%s\\n' "${ANTHROPIC_BASE_URL:-}"
-    printf 'token=%s\\n' "${ANTHROPIC_AUTH_TOKEN:-}"
-    printf 'model=%s\\n' "${ANTHROPIC_MODEL:-}"
-    printf 'haiku=%s\\n' "${ANTHROPIC_DEFAULT_HAIKU_MODEL:-}"
-    printf 'fast=%s\\n' "${ANTHROPIC_SMALL_FAST_MODEL:-}"
-    printf 'arg=<%s>\\n' "$@"
-  } >"$CLAUDE_STUB_CAPTURE"
+if [[ "${1:-}" == "--version" ]]; then
+  printf '%s\n' '0.81.1'
+  exit 0
 fi
-printf '%s\\n' "$CLAUDE_STUB_RESPONSE"
-exit "${CLAUDE_STUB_EXIT:-0}"
+stub_dir="$(cd "$(dirname "$0")" && pwd)"
+prompt="${@: -1}"
+stdin_data="$(cat)"
+{
+  printf 'home=%s\\n' "${HOME:-}"
+  printf 'pi_dir=%s\\n' "${PI_CODING_AGENT_DIR:-}"
+  printf 'offline=%s\\n' "${PI_OFFLINE:-}"
+  printf 'token=%s\\n' "${SII_AGENT_FLEET_API_KEY:-}"
+  printf 'prompt=<%s>\\n' "$prompt"
+  printf 'stdin=<%s>\\n' "$stdin_data"
+  printf 'arg=<%s>\\n' "$@"
+  printf 'models=\n'
+  cat "$PI_CODING_AGENT_DIR/models.json"
+} >"$stub_dir/pi-capture.txt"
+cat "$stub_dir/pi-stderr.txt" >&2
+cat "$stub_dir/pi-response.jsonl"
+exit "$(cat "$stub_dir/pi-exit.txt")"
 """,
             encoding="utf-8",
         )
-        claude.chmod(0o755)
+        pi.chmod(0o755)
 
         harbor = self.repo / "Agents/utils/common/Harbor/start.sh"
         harbor.parent.mkdir(parents=True)
@@ -103,7 +113,7 @@ exit "${STUB_EXIT:-0}"
         self.temp_dir.cleanup()
 
     @staticmethod
-    def response(*, ready=True, message="", spec=None, specs=None):
+    def response(*, ready=True, message="", spec=None, specs=None, stop_reason="stop"):
         if specs is None and ready:
             specs = [spec or {
                 "schema_version": 1,
@@ -113,29 +123,32 @@ exit "${STUB_EXIT:-0}"
             }]
         elif specs is None:
             specs = []
-        return json.dumps(
-            {
-                "type": "result",
-                "structured_output": {
-                    "ready": ready,
-                    "message": message,
-                    "specs": specs,
-                },
-            }
+        translation = json.dumps(
+            {"ready": ready, "message": message, "specs": specs},
+            separators=(",", ":"),
         )
+        assistant = {
+            "role": "assistant",
+            "content": [{"type": "text", "text": translation}],
+            "stopReason": stop_reason,
+        }
+        events = [
+            {"type": "session", "id": "session-1"},
+            {"type": "agent_start"},
+            {"type": "turn_start"},
+            {"type": "message_end", "message": assistant},
+            {"type": "turn_end", "message": assistant},
+            {"type": "agent_end"},
+        ]
+        return "\n".join(json.dumps(event) for event in events)
 
     def goal_env(self, response=None, extra_env=None):
         env = os.environ.copy()
+        extra_env = dict(extra_env or {})
         for name in (
-            "ANTHROPIC_API_KEY",
-            "ANTHROPIC_AUTH_TOKEN",
-            "ANTHROPIC_BASE_URL",
-            "ANTHROPIC_MODEL",
-            "ANTHROPIC_DEFAULT_OPUS_MODEL",
-            "ANTHROPIC_DEFAULT_SONNET_MODEL",
-            "ANTHROPIC_DEFAULT_HAIKU_MODEL",
-            "ANTHROPIC_SMALL_FAST_MODEL",
-            "CLAUDE_CODE_SUBAGENT_MODEL",
+            "PI_CODING_AGENT_DIR",
+            "PI_OFFLINE",
+            "SII_AGENT_FLEET_API_KEY",
             "API_KEY",
             "BASE_URL",
             "MODEL",
@@ -145,10 +158,19 @@ exit "${STUB_EXIT:-0}"
             {
                 "PATH": f"{self.bin_dir}{os.pathsep}{env['PATH']}",
                 "REPO_DIR": str(self.repo),
-                "CLAUDE_STUB_RESPONSE": response or self.response(),
             }
         )
-        env.update(extra_env or {})
+        (self.bin_dir / "pi-response.jsonl").write_text(
+            response or self.response(), encoding="utf-8"
+        )
+        (self.bin_dir / "pi-exit.txt").write_text(
+            str(extra_env.pop("PI_STUB_EXIT", "0")), encoding="utf-8"
+        )
+        (self.bin_dir / "pi-stderr.txt").write_text(
+            extra_env.pop("PI_STUB_STDERR", ""), encoding="utf-8"
+        )
+        self.pi_capture.unlink(missing_ok=True)
+        env.update(extra_env)
         return env
 
     def run_goal(self, *args, response=None, extra_env=None, stdin=None):
@@ -202,8 +224,8 @@ exit "${STUB_EXIT:-0}"
             result.stderr,
         )
 
-    def test_caller_config_wins_and_goal_is_one_literal_argument(self):
-        capture = self.root / "claude-capture.txt"
+    def test_caller_config_wins_and_prompt_is_final_positional_argument(self):
+        capture = self.pi_capture
         goal = '{"request":"run terminal-bench/terminal-bench-2"}'
         result = self.run_goal(
             "--prompt",
@@ -212,22 +234,36 @@ exit "${STUB_EXIT:-0}"
                 "BASE_URL": "https://caller.example.invalid/v1/",
                 "API_KEY": "fake-caller-token",
                 "MODEL": "caller-model",
-                "ANTHROPIC_BASE_URL": "https://stale.example.invalid",
-                "ANTHROPIC_AUTH_TOKEN": "fake-stale-token",
-                "ANTHROPIC_MODEL": "stale-model",
-                "CLAUDE_STUB_CAPTURE": str(capture),
+                "PI_CODING_AGENT_DIR": "/tmp/stale-pi-dir",
+                "SII_AGENT_FLEET_API_KEY": "fake-stale-token",
             },
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
         captured = capture.read_text(encoding="utf-8")
-        self.assertIn("base=https://caller.example.invalid", captured)
         self.assertIn("token=fake-caller-token", captured)
-        self.assertIn("model=caller-model", captured)
-        self.assertIn("haiku=caller-model", captured)
-        self.assertIn("fast=caller-model", captured)
+        self.assertIn("offline=1", captured)
+        self.assertIn('"baseUrl": "https://caller.example.invalid/v1"', captured)
+        self.assertIn('"api": "openai-completions"', captured)
+        self.assertIn('"apiKey": "$SII_AGENT_FLEET_API_KEY"', captured)
+        self.assertIn('"id": "caller-model"', captured)
         self.assertNotIn("stale", captured)
-        self.assertIn(f"arg=<{goal}>", captured)
+        # Pi print mode consumes the user message as the trailing positional
+        # argument and must receive nothing on stdin; a stub that read the
+        # prompt from stdin previously masked a broken real invocation.
+        self.assertIn(f"prompt=<{goal}>", captured)
+        self.assertIn("stdin=<>", captured)
+        arg_lines = [
+            line for line in captured.splitlines() if line.startswith("arg=<")
+        ]
+        self.assertEqual(arg_lines[-1], f"arg=<{goal}>")
+        self.assertIn("arg=<--provider>", captured)
+        self.assertIn("arg=<sii-gateway>", captured)
+        self.assertIn("arg=<--no-tools>", captured)
+        self.assertIn("arg=<--no-extensions>", captured)
+        self.assertIn("arg=<--no-skills>", captured)
+        self.assertIn("arg=<--no-context-files>", captured)
+        self.assertIn("arg=<--no-approve>", captured)
         self.assertIn("Terminus-2", captured)
         self.assertIn("return ready=false", captured)
         self.assertIn('"specs"', captured)
@@ -449,11 +485,10 @@ exit "${STUB_EXIT:-0}"
     def test_missing_config_fails_before_calling_the_model(self):
         (self.repo / "config.env").unlink()
         (self.repo / "config.local.env").unlink()
-        capture = self.root / "claude-capture.txt"
+        capture = self.pi_capture
         result = self.run_goal(
             "--prompt",
             "Run pinchbench",
-            extra_env={"CLAUDE_STUB_CAPTURE": str(capture)},
         )
 
         self.assertEqual(result.returncode, 1)
@@ -465,9 +500,9 @@ exit "${STUB_EXIT:-0}"
         result = self.run_goal(
             "--prompt",
             "Run pinchbench",
-            response=json.dumps({"result": "API Error: UND_ERR_SOCKET"}),
             extra_env={
-                "CLAUDE_STUB_EXIT": "1",
+                "PI_STUB_EXIT": "1",
+                "PI_STUB_STDERR": "API Error: UND_ERR_SOCKET\n",
                 "HTTPS_PROXY": "http://proxy.example.invalid:8080",
             },
         )
@@ -475,6 +510,70 @@ exit "${STUB_EXIT:-0}"
         self.assertEqual(result.returncode, 1)
         self.assertIn("UND_ERR_SOCKET", result.stderr)
         self.assertIn("add its hostname to NO_PROXY", result.stderr)
+        self.assertNotIn("runner=", result.stdout)
+
+    def test_prompt_rejects_invalid_pi_jsonl(self):
+        result = self.run_goal(
+            "--prompt",
+            "Run pinchbench",
+            response="not-jsonl\n",
+        )
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("Pi returned invalid JSONL", result.stderr)
+        self.assertNotIn("runner=", result.stdout)
+
+    def test_prompt_rejects_incomplete_pi_lifecycle(self):
+        events = [json.loads(line) for line in self.response().splitlines()]
+        events = [event for event in events if event["type"] != "agent_end"]
+        result = self.run_goal(
+            "--prompt",
+            "Run pinchbench",
+            response="\n".join(json.dumps(event) for event in events),
+        )
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("Pi agent lifecycle is incomplete", result.stderr)
+        self.assertNotIn("runner=", result.stdout)
+
+    def test_prompt_rejects_pi_provider_error(self):
+        events = [json.loads(line) for line in self.response().splitlines()]
+        events.insert(-1, {"type": "auto_retry_end", "finalError": "gateway unavailable"})
+        result = self.run_goal(
+            "--prompt",
+            "Run pinchbench",
+            response="\n".join(json.dumps(event) for event in events),
+        )
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("Pi provider request failed: gateway unavailable", result.stderr)
+        self.assertNotIn("runner=", result.stdout)
+
+    def test_prompt_rejects_aborted_pi_final_message(self):
+        result = self.run_goal(
+            "--prompt",
+            "Run pinchbench",
+            response=self.response(stop_reason="aborted"),
+        )
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("stopped with aborted", result.stderr)
+        self.assertNotIn("runner=", result.stdout)
+
+    def test_prompt_rejects_markdown_wrapped_pi_json(self):
+        events = [json.loads(line) for line in self.response().splitlines()]
+        for event in events:
+            message = event.get("message")
+            if message:
+                message["content"][0]["text"] = '```json\n{"ready":true}\n```'
+        result = self.run_goal(
+            "--prompt",
+            "Run pinchbench",
+            response="\n".join(json.dumps(event) for event in events),
+        )
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("final assistant message is not a JSON object", result.stderr)
         self.assertNotIn("runner=", result.stdout)
 
     def test_goal_requires_nonempty_text(self):
@@ -518,13 +617,12 @@ exit "${STUB_EXIT:-0}"
         self.assertIn("runner=harbor", result.stdout)
 
     def test_prompt_output_requires_a_file_path_before_model_call(self):
-        capture = self.root / "claude-capture.txt"
+        capture = self.pi_capture
         result = self.run_goal(
             "--prompt",
             "Run pinchbench",
             "--output",
             "-",
-            extra_env={"CLAUDE_STUB_CAPTURE": str(capture)},
         )
 
         self.assertEqual(result.returncode, 2)
@@ -533,13 +631,12 @@ exit "${STUB_EXIT:-0}"
         self.assertNotIn("runner=", result.stdout)
 
     def test_prompt_output_rejects_empty_path_before_model_call(self):
-        capture = self.root / "claude-capture.txt"
+        capture = self.pi_capture
         result = self.run_goal(
             "--prompt",
             "Run pinchbench",
             "--output",
             "",
-            extra_env={"CLAUDE_STUB_CAPTURE": str(capture)},
         )
 
         self.assertEqual(result.returncode, 2)
@@ -548,13 +645,12 @@ exit "${STUB_EXIT:-0}"
         self.assertNotIn("runner=", result.stdout)
 
     def test_prompt_output_rejects_mistyped_option_token_before_model_call(self):
-        capture = self.root / "claude-capture.txt"
+        capture = self.pi_capture
         result = self.run_goal(
             "--prompt",
             "Run pinchbench",
             "--output",
             "--dryrn",
-            extra_env={"CLAUDE_STUB_CAPTURE": str(capture)},
         )
 
         self.assertEqual(result.returncode, 2)
@@ -565,13 +661,12 @@ exit "${STUB_EXIT:-0}"
     def test_prompt_output_rejects_option_token_before_model_call(self):
         # `--output --dry-run` is a mangled preview command; consuming the
         # token as a filename silently turned it into a live benchmark run.
-        capture = self.root / "claude-capture.txt"
+        capture = self.pi_capture
         result = self.run_goal(
             "--prompt",
             "Run pinchbench",
             "--output",
             "--dry-run",
-            extra_env={"CLAUDE_STUB_CAPTURE": str(capture)},
         )
 
         self.assertEqual(result.returncode, 2)

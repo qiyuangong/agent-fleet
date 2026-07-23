@@ -6,15 +6,30 @@ TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
 PROJECT_DIR="$TMP_DIR/repo"
-mkdir -p "$PROJECT_DIR/scripts/dind" "$TMP_DIR/bin"
+mkdir -p \
+  "$PROJECT_DIR/scripts/dind" \
+  "$PROJECT_DIR/Agents/utils/common/Harbor" \
+  "$TMP_DIR/bin"
 cp "$REPO_ROOT/scripts/dind-run.sh" "$PROJECT_DIR/scripts/dind-run.sh"
+sed -i \
+  '0,/if running_in_container; then/s//if [[ "${DIND_TEST_ASSUME_HOST:-0}" != "1" ]] \&\& running_in_container; then/' \
+  "$PROJECT_DIR/scripts/dind-run.sh"
+cp "$REPO_ROOT/scripts/dind/dockerd-entrypoint.sh" "$PROJECT_DIR/scripts/dind/dockerd-entrypoint.sh"
 cp "$REPO_ROOT/scripts/run_fleet.sh" "$PROJECT_DIR/scripts/run_fleet.sh"
 cp "$REPO_ROOT/scripts/fleet_spec_io.sh" "$PROJECT_DIR/scripts/fleet_spec_io.sh"
 cp "$REPO_ROOT/scripts/fleet_spec_validate.jq" "$PROJECT_DIR/scripts/fleet_spec_validate.jq"
+cp \
+  "$REPO_ROOT/Agents/utils/common/Harbor/runner-requirements.txt" \
+  "$PROJECT_DIR/Agents/utils/common/Harbor/runner-requirements.txt"
+if grep -q -- 'tcp://0.0.0.0:2375' "$PROJECT_DIR/scripts/dind/dockerd-entrypoint.sh"; then
+  echo "DinD entrypoint exposes an unauthenticated TCP daemon" >&2
+  exit 1
+fi
 chmod +x "$PROJECT_DIR/scripts/dind-run.sh"
 touch "$PROJECT_DIR/scripts/setup.sh"
 touch "$PROJECT_DIR/scripts/dind/Dockerfile"
 chmod +x "$PROJECT_DIR/scripts/setup.sh" "$PROJECT_DIR/scripts/run_fleet.sh"
+export DIND_TEST_ASSUME_HOST=1
 
 cat > "$PROJECT_DIR/config.env" <<'EOF'
 BASE_URL=https://config.example.com
@@ -33,8 +48,11 @@ DIND_DEFAULT_ADDRESS_POOLS="base=10.200.0.0/13,size=21;base=172.16.0.0/12,size=2
 EOF
 
 LOG="$TMP_DIR/docker.log"
+DOCKER_ACTION_LOG="$TMP_DIR/docker-actions.log"
+export DOCKER_ACTION_LOG
 cat > "$TMP_DIR/bin/docker" <<'MOCK'
 #!/usr/bin/env bash
+printf '%s\n' "$*" >> "$DOCKER_ACTION_LOG"
 printf 'docker'
 for arg in "$@"; do
   printf ' <%s>' "$arg"
@@ -74,8 +92,15 @@ grep -q -- '<-e> <HTTP_PROXY=http://proxy.invalid:8080>' "$LOG"
 grep -q -- '<-e> <HTTPS_PROXY=http://proxy.invalid:8443>' "$LOG"
 grep -q -- '<-e> <NO_PROXY=existing.example,127.0.0.1,localhost,host.docker.internal,local.example.com>' "$LOG"
 grep -q -- '<-e> <no_proxy=existing.example,127.0.0.1,localhost,host.docker.internal,local.example.com>' "$LOG"
-grep -q -- "<build> <--build-arg> <DIND_BASE_IMAGE=m.daocloud.io/docker.io/library/docker:28-dind> <-f> <$PROJECT_DIR/scripts/dind/Dockerfile> <-t> <sii-agent-fleet-dind:28> <$PROJECT_DIR>" "$LOG"
-grep -q -- '<sii-agent-fleet-dind:28>' "$LOG"
+RUNNER_IMAGE="$(grep -Eo 'sii-agent-fleet-dind:28-[0-9a-f]{12}' "$LOG" | head -n 1 || true)"
+if [[ -z "$RUNNER_IMAGE" ]]; then
+  echo "default runner image tag is not fingerprinted" >&2
+  exit 1
+fi
+grep -q -- '<--build-arg> <DIND_BASE_IMAGE=m.daocloud.io/docker.io/library/debian:bookworm-slim@sha256:7b140f374b289a7c2befc338f42ebe6441b7ea838a042bbd5acbfca6ec875818>' "$LOG"
+grep -q -- '<--build-arg> <UV_IMAGE=m.daocloud.io/ghcr.io/astral-sh/uv:0.11.28>' "$LOG"
+grep -q -- "<-f> <$PROJECT_DIR/scripts/dind/Dockerfile> <-t> <$RUNNER_IMAGE> <$PROJECT_DIR>" "$LOG"
+grep -q -- "<--label> <sii.agent-fleet.runner-image=$RUNNER_IMAGE>" "$LOG"
 grep -q -- '<env> <REPO_DIR='"$PROJECT_DIR"'> <BASE_URL=https://local.example.com> <API_KEY=sk-local> <MODEL=local-model>' "$LOG"
 # The documented no-Opik escape must survive the DinD env handoff.
 grep -q -- '<TRACE_TO_OPIK=false>' "$LOG"
@@ -86,9 +111,51 @@ fi
 grep -q -- '<./scripts/setup.sh>' "$LOG"
 grep -q -- '<./scripts/run_fleet.sh> <--taskset> <terminalbench21> <--agent> <claude-code> <--workers> <1>' "$LOG"
 
+mkdir -p "$TMP_DIR/existing-bin"
+cat > "$TMP_DIR/existing-bin/docker" <<'MOCK'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "ps" ]]; then
+  printf '%s\n' 'sii-agent-fleet-dind'
+  exit 0
+fi
+if [[ "${1:-}" == "inspect" && "$*" == *"sii.agent-fleet.runner-image"* ]]; then
+  printf '%s\n' 'sii-agent-fleet-dind:stale'
+  exit 0
+fi
+exit 0
+MOCK
+chmod +x "$TMP_DIR/existing-bin/docker"
+
+STALE_LOG="$TMP_DIR/stale.log"
+if PATH="$TMP_DIR/existing-bin:$PATH" \
+  DIND_IMAGE=sii-agent-fleet-dind:current \
+  "$PROJECT_DIR/scripts/dind-run.sh" \
+    --taskset terminalbench21 --agent claude-code --workers 1 \
+    > "$STALE_LOG" 2>&1; then
+  echo "dind-run.sh reused a container created from a stale runner image" >&2
+  exit 1
+fi
+grep -q -- 'uses a different runner image' "$STALE_LOG"
+grep -q -- 'rerun with DIND_RECREATE=1' "$STALE_LOG"
+
+RECREATE_LOG="$TMP_DIR/recreate.log"
+: > "$DOCKER_ACTION_LOG"
+PATH="$TMP_DIR/bin:$PATH" \
+DIND_RECREATE=1 \
+DIND_BOOTSTRAP=skip \
+"$PROJECT_DIR/scripts/dind-run.sh" \
+  --taskset terminalbench21 --agent claude-code --workers 1 \
+  > "$RECREATE_LOG"
+grep -q -- '^rm -f sii-agent-fleet-dind$' "$DOCKER_ACTION_LOG"
+if grep -q -- '^volume rm ' "$DOCKER_ACTION_LOG"; then
+  echo "DIND_RECREATE removed the Docker storage volume" >&2
+  exit 1
+fi
+
 FALLBACK_LOG="$TMP_DIR/fallback.log"
 PATH="$TMP_DIR/bin:$PATH" \
 container=docker \
+DIND_TEST_ASSUME_HOST=0 \
 "$PROJECT_DIR/scripts/dind-run.sh" --taskset terminalbench21 --agent claude-code --workers 1 --dry-run > "$FALLBACK_LOG" 2>&1
 
 grep -q -- '\[WARN\] dind-run.sh cannot start DinD inside a container; running scripts/run_fleet.sh directly' "$FALLBACK_LOG"

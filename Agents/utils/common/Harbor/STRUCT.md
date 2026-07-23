@@ -16,7 +16,9 @@ Agents/utils/common/Harbor/
 ├── run_harbor_registry.sh      # Registry runner with optional final-pane hold
 ├── harboropik.sh               # Harbor CLI wrapper with Opik setup
 ├── prepare_local_deps.sh       # Local package/cache preparation
-├── harbor_prepare_runner_cli.py
+├── runner-requirements.txt     # Exact direct dependencies for the runner image
+├── setup_runner_env.sh         # Explicit host setup / image validation
+├── harbor_prepare_runner_cli.py # Startup validation for the configured CLI
 ├── harbor_worker_utils.py
 └── scripts/
     ├── monitor.py              # Monitor CLI entrypoint and path resolution

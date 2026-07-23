@@ -444,8 +444,7 @@ def _patch_claude_code_realtime_hooks() -> None:
 
     async def patched_run(self, instruction, environment, context):  # type: ignore[no-untyped-def]
         extra_env = getattr(self, "_extra_env", None)
-        if not _hook_enabled(extra_env):
-            return await original_run(self, instruction, environment, context)
+        hook_enabled = _hook_enabled(extra_env)
 
         original_exec_as_agent = self.exec_as_agent
 
@@ -457,9 +456,8 @@ def _patch_claude_code_realtime_hooks() -> None:
             cwd=None,
             timeout_sec=None,
         ):
-            # Fix Harbor's missing shell-quoting of --append-system-prompt.
-            # Must run before any other command manipulation so that subsequent
-            # string searches (e.g. "CLAUDE_CONFIG_DIR/debug") still match.
+            # This compatibility fix is independent of Opik and must always
+            # run, including when external tracing is disabled.
             patched_command = _fix_unquoted_append_system_prompt(command)
             if "claude --verbose --output-format=stream-json" in patched_command:
                 patched_command = (
@@ -473,7 +471,8 @@ def _patch_claude_code_realtime_hooks() -> None:
             # and append a printf that writes our hook configuration into
             # $CLAUDE_CONFIG_DIR/settings.json so Claude Code picks it up.
             if (
-                "CLAUDE_CONFIG_DIR/debug" in command
+                hook_enabled
+                and "CLAUDE_CONFIG_DIR/debug" in command
                 and "mkdir -p" in command
                 and not getattr(_self, "_opik_hook_settings_written", False)
             ):

@@ -283,7 +283,9 @@ run_harboropik() {
     HARBOR_CAPTURE_FILE="$capture_file" \
     HARBOR_CAPTURE_RESULT="1" \
     HARBOR_OPIK_BIN="$capture_bin" \
+    HARBOR_CLI_BIN="$capture_bin" \
     HARBOR_OPIK_PYTHON="$capture_bin" \
+    HARBOR_RUNNER_PREPARE="0" \
     OPENCODE_CONFIG_CONTENT="{}" \
     bash "$HARBOR_DIR/harboropik.sh" >"$log_file" 2>&1; then
     cat "$log_file" >&2

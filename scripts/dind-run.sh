@@ -19,9 +19,10 @@ overridden in config.local.env:
 
 Useful overrides:
   DIND_NAME                 Container name (default: sii-agent-fleet-dind)
-  DIND_IMAGE                DinD runner image (default: sii-agent-fleet-dind:28; built locally if missing)
+  DIND_IMAGE                DinD runner image (default tag follows its build inputs; built locally if missing)
   DIND_IMAGE_DOCKERFILE     Dockerfile for default image build (default: scripts/dind/Dockerfile)
   DIND_BASE_IMAGE           Base image used when building default image
+  DIND_UV_IMAGE             uv image used when building default image
   DIND_DOCKER_VOLUME        /var/lib/docker volume (default: <name>-docker)
   DIND_HOME_VOLUME          benchmark-user home volume (default: <name>-home)
   DIND_USER                 user for the benchmark launcher (default: sii)
@@ -31,7 +32,8 @@ Useful overrides:
   DIND_MOUNTS               Comma-separated extra docker -v entries
   DIND_DEFAULT_ADDRESS_POOLS Semicolon-separated dockerd pools, e.g. base=10.200.0.0/13,size=21
   DIND_BOOTSTRAP            always|missing|skip (default: missing)
-  DIND_RESET                1 removes the DinD container and Docker storage volume first
+  DIND_RECREATE             1 recreates the DinD container but preserves Docker storage
+  DIND_RESET                1 recreates the DinD container and removes Docker storage
 EOF
 }
 
@@ -91,10 +93,26 @@ eval "$caller_env"
 unset caller_env
 
 DIND_NAME="${DIND_NAME:-sii-agent-fleet-dind}"
-DIND_DEFAULT_IMAGE="sii-agent-fleet-dind:28"
-DIND_IMAGE="${DIND_IMAGE:-$DIND_DEFAULT_IMAGE}"
 DIND_IMAGE_DOCKERFILE="${DIND_IMAGE_DOCKERFILE:-$REPO_ROOT/scripts/dind/Dockerfile}"
-DIND_BASE_IMAGE="${DIND_BASE_IMAGE:-m.daocloud.io/docker.io/library/docker:28-dind}"
+DIND_BASE_IMAGE="${DIND_BASE_IMAGE:-m.daocloud.io/docker.io/library/debian:bookworm-slim@sha256:7b140f374b289a7c2befc338f42ebe6441b7ea838a042bbd5acbfca6ec875818}"
+DIND_UV_IMAGE="${DIND_UV_IMAGE:-m.daocloud.io/ghcr.io/astral-sh/uv:0.11.28}"
+DIND_RUNNER_REQUIREMENTS_FILE="$REPO_ROOT/Agents/utils/common/Harbor/runner-requirements.txt"
+DIND_DOCKERD_ENTRYPOINT_FILE="$REPO_ROOT/scripts/dind/dockerd-entrypoint.sh"
+for image_input in \
+  "$DIND_IMAGE_DOCKERFILE" \
+  "$DIND_DOCKERD_ENTRYPOINT_FILE" \
+  "$DIND_RUNNER_REQUIREMENTS_FILE"; do
+  if [[ ! -f "$image_input" ]]; then
+    err "DinD image input not found: $image_input"
+    exit 1
+  fi
+done
+DIND_IMAGE_FINGERPRINT="$({
+  printf '%s\n' "$DIND_BASE_IMAGE" "$DIND_UV_IMAGE"
+  cat "$DIND_IMAGE_DOCKERFILE" "$DIND_DOCKERD_ENTRYPOINT_FILE" "$DIND_RUNNER_REQUIREMENTS_FILE"
+} | sha256sum | cut -c1-12)"
+DIND_DEFAULT_IMAGE="sii-agent-fleet-dind:28-$DIND_IMAGE_FINGERPRINT"
+DIND_IMAGE="${DIND_IMAGE:-$DIND_DEFAULT_IMAGE}"
 DIND_DOCKER_VOLUME="${DIND_DOCKER_VOLUME:-${DIND_NAME}-docker}"
 DIND_HOME_VOLUME="${DIND_HOME_VOLUME:-${DIND_NAME}-home}"
 DIND_USER="${DIND_USER:-sii}"
@@ -183,12 +201,13 @@ if ! command -v docker >/dev/null 2>&1; then
 fi
 
 if [[ "$DIND_IMAGE" == "$DIND_DEFAULT_IMAGE" ]] && ! docker image inspect "$DIND_IMAGE" >/dev/null 2>&1; then
-  if [[ ! -f "$DIND_IMAGE_DOCKERFILE" ]]; then
-    err "DinD image Dockerfile not found: $DIND_IMAGE_DOCKERFILE"
-    exit 1
-  fi
   info "building DinD runner image: $DIND_IMAGE"
-  docker build --build-arg "DIND_BASE_IMAGE=$DIND_BASE_IMAGE" -f "$DIND_IMAGE_DOCKERFILE" -t "$DIND_IMAGE" "$REPO_ROOT"
+  docker build \
+    --build-arg "DIND_BASE_IMAGE=$DIND_BASE_IMAGE" \
+    --build-arg "UV_IMAGE=$DIND_UV_IMAGE" \
+    -f "$DIND_IMAGE_DOCKERFILE" \
+    -t "$DIND_IMAGE" \
+    "$REPO_ROOT"
 fi
 
 registry_mirrors="${DIND_REGISTRY_MIRRORS:-}"
@@ -244,6 +263,8 @@ container_running() {
 if [[ "${DIND_RESET:-0}" == "1" ]]; then
   docker rm -f "$DIND_NAME" >/dev/null 2>&1 || true
   docker volume rm "$DIND_DOCKER_VOLUME" >/dev/null 2>&1 || true
+elif [[ "${DIND_RECREATE:-0}" == "1" ]]; then
+  docker rm -f "$DIND_NAME" >/dev/null 2>&1 || true
 fi
 
 if ! container_exists; then
@@ -251,6 +272,7 @@ if ! container_exists; then
   docker_run_args=(
     run -d --privileged
     --name "$DIND_NAME"
+    --label "sii.agent-fleet.runner-image=$DIND_IMAGE"
     --label "sii.agent-fleet.registry-mirrors=$registry_mirrors"
     --label "sii.agent-fleet.default-address-pools=$default_address_pools"
     -e DOCKER_TLS_CERTDIR=
@@ -273,12 +295,20 @@ if ! container_exists; then
   fi
   docker "${docker_run_args[@]}"
 else
+  existing_runner_image="$(docker inspect -f '{{ index .Config.Labels "sii.agent-fleet.runner-image" }}' "$DIND_NAME" 2>/dev/null || true)"
+  if [[ "$existing_runner_image" != "$DIND_IMAGE" ]]; then
+    err "existing DinD container $DIND_NAME uses a different runner image"
+    err "existing: ${existing_runner_image:-<unlabeled>}"
+    err "current:  $DIND_IMAGE"
+    err "rerun with DIND_RECREATE=1 to recreate the DinD container while preserving Docker storage"
+    exit 1
+  fi
   existing_mirrors="$(docker inspect -f '{{ index .Config.Labels "sii.agent-fleet.registry-mirrors" }}' "$DIND_NAME" 2>/dev/null || true)"
   if [[ "$existing_mirrors" != "$registry_mirrors" ]]; then
     err "existing DinD container $DIND_NAME was created with different registry mirrors"
     err "existing: ${existing_mirrors:-<empty>}"
     err "current:  ${registry_mirrors:-<empty>}"
-    err "rerun with DIND_RESET=1 to recreate the DinD daemon"
+    err "rerun with DIND_RECREATE=1 to recreate the DinD daemon while preserving Docker storage"
     exit 1
   fi
   existing_address_pools="$(docker inspect -f '{{ index .Config.Labels "sii.agent-fleet.default-address-pools" }}' "$DIND_NAME" 2>/dev/null || true)"
@@ -286,7 +316,7 @@ else
     err "existing DinD container $DIND_NAME was created with different default address pools"
     err "existing: ${existing_address_pools:-<empty>}"
     err "current:  ${default_address_pools:-<empty>}"
-    err "rerun with DIND_RESET=1 to recreate the DinD daemon"
+    err "rerun with DIND_RECREATE=1 to recreate the DinD daemon while preserving Docker storage"
     exit 1
   fi
   if ! container_running; then

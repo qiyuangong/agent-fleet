@@ -1,8 +1,8 @@
 name: PR Quick CI
 
 "on":
-  pull_request:
-    types: [opened, reopened, synchronize, ready_for_review]
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review, converted_to_draft]
 
 permissions:
   contents: read
@@ -14,33 +14,71 @@ concurrency:
 jobs:
   quick-checks:
     name: Quick checks
-    if: ${{ !github.event.pull_request.draft && github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 10
 
+    # Candidate files are checked out on the host but are only executed inside
+    # the restricted container below. Keep every host-side command base-trusted.
     steps:
-      - name: Check out pull request
+      - name: Check out trusted CI definition
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: trusted-${{ github.run_id }}
           persist-credentials: false
 
-      - name: Show runtime versions
+      - name: Build trusted test sandbox
         run: |
           set -euo pipefail
-          python3 --version
-          bash --version | head -n 1
+          docker build \
+            --file "$GITHUB_WORKSPACE/trusted-${{ github.run_id }}/.github/ci/Dockerfile" \
+            --tag "agent-fleet-pr-ci:${{ github.run_id }}" \
+            "$GITHUB_WORKSPACE/trusted-${{ github.run_id }}/.github/ci"
 
-      - name: Validate shell syntax
-        run: |
-          set -euo pipefail
-          while IFS= read -r -d '' script; do
-            bash -n "$script"
-          done < <(git ls-files -z '*.sh')
+      - name: Check out candidate source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: candidate-${{ github.run_id }}
+          persist-credentials: false
 
-      - name: Run quick unit tests
+      - name: Run isolated quick checks
         run: |
           set -euo pipefail
-          python3 -m unittest discover -s tests -v
-          python3 -m unittest discover -s scripts/tests -v
-          bash scripts/tests/test_dind_run.sh
-          python3 -m unittest discover -s .github/scripts/tests -v
+          docker run --rm \
+            --network none \
+            --read-only \
+            --cap-drop ALL \
+            --security-opt no-new-privileges \
+            --pids-limit 512 \
+            --memory 2g \
+            --cpus 2 \
+            --user 65534:65534 \
+            --env HOME=/tmp/home \
+            --tmpfs /tmp:rw,nosuid,nodev,exec,size=2g,mode=1777 \
+            --volume "$GITHUB_WORKSPACE/candidate-${{ github.run_id }}:/src:ro" \
+            "agent-fleet-pr-ci:${{ github.run_id }}" \
+            bash -lc '
+              set -euo pipefail
+              mkdir -p /tmp/home /tmp/work
+              cp -R /src/. /tmp/work
+              cd /tmp/work
+              find . -type f -name "*.sh" -not -path "./.git/*" -print0 |
+                while IFS= read -r -d "" script; do
+                  bash -n "$script"
+                done
+              python3 -m unittest discover -s tests -v
+              python3 -m unittest discover -s scripts/tests -v
+              bash scripts/tests/test_dind_run.sh
+              python3 -m unittest discover -s .github/scripts/tests -v
+            '
+
+      - name: Clean up sandbox
+        if: ${{ always() }}
+        run: |
+          set -euo pipefail
+          docker image rm --force "agent-fleet-pr-ci:${{ github.run_id }}" || true
+          rm -rf -- \
+            "$GITHUB_WORKSPACE/trusted-${{ github.run_id }}" \
+            "$GITHUB_WORKSPACE/candidate-${{ github.run_id }}"

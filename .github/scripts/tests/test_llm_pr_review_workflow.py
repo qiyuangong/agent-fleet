@@ -28,7 +28,7 @@ class LlmPrReviewWorkflowTest(unittest.TestCase):
                 self.assertNotIn("reusable-llm-pr-review.yml", workflow)
                 self.assertNotIn("secrets: inherit", workflow)
                 self.assertIn("actions/checkout@", workflow)
-                self.assertIn("llm_pr_review.py", workflow)
+                self.assertIn("pi_pr_review.py", workflow)
 
     def test_hosted_skips_drafts_while_self_hosted_reviews_them(self):
         self.assertIn("!github.event.pull_request.draft", self.hosted)
@@ -44,7 +44,7 @@ class LlmPrReviewWorkflowTest(unittest.TestCase):
             "group: llm-pr-review-${{ github.event.pull_request.number }}",
             "runs-on: ubuntu-latest",
             "environment: llm-pr-review",
-            "LLM_REVIEW_ID: llm-pr-review",
+            "LLM_REVIEW_ID: pi-pr-review",
         )
         for setting in expected:
             with self.subTest(setting=setting):
@@ -57,7 +57,7 @@ class LlmPrReviewWorkflowTest(unittest.TestCase):
             "${{ github.event.pull_request.number }}",
             "runs-on: [self-hosted, Linux, X64]",
             "environment: self-hosted-env",
-            "LLM_REVIEW_ID: self-hosted-llm-pr-review",
+            "LLM_REVIEW_ID: self-hosted-pi-pr-review",
         )
         for setting in expected:
             with self.subTest(setting=setting):
@@ -71,7 +71,7 @@ class LlmPrReviewWorkflowTest(unittest.TestCase):
             "LLM_REVIEW_API_KEY: ${{ secrets.LLM_REVIEW_API_KEY }}",
             "LLM_REVIEW_BASE_URL: ${{ vars.LLM_REVIEW_BASE_URL }}",
             "LLM_REVIEW_MODEL: ${{ vars.LLM_REVIEW_MODEL }}",
-            "--prompt-path .github/scripts/llm_review_prompt.md",
+            "--prompt-path .github/scripts/pi_review_prompt.md",
         )
         for workflow in (self.hosted, self.self_hosted):
             for setting in expected:
@@ -85,7 +85,7 @@ class LlmPrReviewWorkflowTest(unittest.TestCase):
                 re.compile(r"uses: actions/checkout@[0-9a-f]{40}"),
             )
             self.assertEqual(workflow.count("actions/checkout@"), 1)
-            self.assertEqual(workflow.count("llm_pr_review.py"), 1)
+            self.assertEqual(workflow.count("pi_pr_review.py"), 1)
 
     def test_environment_configuration_uses_shared_names(self):
         for workflow in (self.hosted, self.self_hosted):

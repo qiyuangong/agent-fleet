@@ -459,6 +459,15 @@ class FakeLlm:
 
 
 class OrchestrationTest(unittest.TestCase):
+    def test_reviews_draft_when_workflow_allows_it(self) -> None:
+        github = FakeGitHub()
+        github.pull["draft"] = True
+
+        result = review.run_review(github, FakeLlm(), 7, "prompt")
+
+        self.assertEqual(result, "published")
+        self.assertEqual(len(github.created), 1)
+
     def test_collect_files_anchors_renames_to_the_new_path(self) -> None:
         files, skipped = review.collect_files(
             [
@@ -509,6 +518,29 @@ class OrchestrationTest(unittest.TestCase):
         self.assertEqual(result, "duplicate")
         self.assertEqual(github.created, [])
 
+    def test_review_ids_keep_parallel_reviewers_independent(self) -> None:
+        github = FakeGitHub()
+        github.reviews = [
+            {
+                "user": {"login": "github-actions[bot]"},
+                "body": "<!-- llm-pr-review:head-1 -->",
+            }
+        ]
+
+        result = review.run_review(
+            github,
+            FakeLlm(),
+            7,
+            "prompt",
+            review_id="self-hosted-llm-pr-review",
+        )
+
+        self.assertEqual(result, "published")
+        self.assertIn(
+            "<!-- self-hosted-llm-pr-review:head-1 -->",
+            github.created[0][2],
+        )
+
     def test_existing_review_ignores_null_user(self) -> None:
         reviews = [{"user": None, "body": "<!-- llm-pr-review:head-1 -->"}]
 
@@ -554,13 +586,20 @@ class OrchestrationTest(unittest.TestCase):
         self.assertIn("5 additional skipped file(s)", summary)
 
     def test_summary_reports_partial_when_a_chunk_is_incomplete(self) -> None:
-        summary = review.build_summary("head-1", [], 0, [], False, 1)
+        summary = review.build_summary(
+            "head-1",
+            [],
+            0,
+            [],
+            False,
+            incomplete_chunks=1,
+        )
 
         self.assertIn("Coverage: Partial", summary)
         self.assertIn("empty model response", summary)
 
     def test_summary_reports_complete_when_no_chunk_is_incomplete(self) -> None:
-        summary = review.build_summary("head-1", [], 0, [], False, 0)
+        summary = review.build_summary("head-1", [], 0, [], False)
 
         self.assertIn("Coverage: Complete", summary)
         self.assertNotIn("empty model response", summary)
@@ -588,13 +627,16 @@ class WorkflowContractTest(unittest.TestCase):
 
     def test_workflow_has_least_permissions_and_base_checkout(self) -> None:
         workflow = SCRIPT_DIR.parent.joinpath("workflows/llm-pr-review.yml").read_text()
+        reusable = SCRIPT_DIR.parent.joinpath(
+            "workflows/reusable-llm-pr-review.yml"
+        ).read_text()
 
         self.assertIn("contents: read", workflow)
         self.assertIn("pull-requests: write", workflow)
         self.assertNotIn("issues: write", workflow)
         self.assertIn("cancel-in-progress: true", workflow)
-        self.assertIn("pull_request.base.sha", workflow)
-        self.assertIn("persist-credentials: false", workflow)
+        self.assertIn("pull_request.base.sha", reusable)
+        self.assertIn("persist-credentials: false", reusable)
 
 
 if __name__ == "__main__":

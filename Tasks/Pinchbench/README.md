@@ -194,7 +194,7 @@ The runner reads defaults from [`config/pinchbench.env`](./config/pinchbench.env
 | `JUDGE_MODEL` | _(benchmark.py default)_ | Judge model override |
 | `API_KEY` | _(none)_ | Generic provider API key; the runner maps it to PinchBench's expected env var when needed |
 | `OPENROUTER_API_KEY` | _(none)_ | Compatibility env var used by upstream PinchBench; usually you can just set `API_KEY` |
-| `TRACE_TO_OPIK` | `true` | Shared fleet tracing switch; set `false` for the Opik-free worker and gateway path |
+| `TRACE_TO_OPIK` | _(follows `OPIK_URL`)_ | Shared fleet tracing switch; unset means on only when `OPIK_URL` is set. Set `false` for the Opik-free worker and gateway path |
 | `PINCHBENCH_DIR` | `/tmp/pinchbench-skill` | PinchBench checkout path |
 | `PINCHBENCH_REF` | `f3f1cb560c252541cef6a106c05ba4f2e8068be0` | Upstream PinchBench git ref pinned by this runner |
 | `PINCHBENCH_OUTPUT_DIR` | `Tasks/Pinchbench/.pinchbench-results-docker` | Output root |

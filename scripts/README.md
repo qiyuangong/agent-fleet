@@ -506,11 +506,12 @@ interfaces:
 - `--detach` is redundant for multi-run input: Harbor runs always detach there
   (an informational notice is printed), while OpenClaw runners stay in the
   foreground and ignore `--detach` with a warning in every mode.
-- If `TRACE_TO_OPIK` is absent, benchmark runners retain their historical
-  tracing-on default and require `OPIK_URL`. Interactive setup avoids that
-  ambiguity by always persisting an explicit state: a supplied `OPIK_URL`
-  derives `TRACE_TO_OPIK=true`, while an empty optional URL derives
-  `TRACE_TO_OPIK=false`.
+- If `TRACE_TO_OPIK` is absent, every host entry point derives it from
+  `OPIK_URL`: a configured endpoint turns tracing on, no endpoint turns it off.
+  The derivation logs one line to stderr; an explicit switch stays silent.
+  Interactive setup avoids the question entirely by always persisting an
+  explicit state: a supplied `OPIK_URL` derives `TRACE_TO_OPIK=true`, while an
+  empty optional URL derives `TRACE_TO_OPIK=false`.
 - `TRACE_TO_OPIK` remains the advanced fleet-wide switch for Harbor, workers,
   rollouts, DinD, ClawBio, and PinchBench. A caller-supplied switch takes
   precedence over a caller-supplied URL, which in turn takes precedence over

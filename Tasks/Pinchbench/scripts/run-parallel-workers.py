@@ -77,7 +77,22 @@ def config_bool(value: str | None, default: bool) -> bool:
 
 def trace_to_opik_enabled(value: str | None) -> bool:
     """Match the fleet-wide trace switch used by the Harbor/OpenClaw runners."""
-    return (value or "true") not in {"false", "0"}
+    return (value or "false") not in {"false", "0"}
+
+
+def resolve_trace_to_opik(value: str | None, opik_url: str | None) -> str:
+    """Resolve the fleet-wide switch the way scripts/config_loader.sh does.
+
+    Opik is optional, so an absent switch must not demand an Opik server.
+    A configured OPIK_URL means tracing was wanted, no endpoint means it
+    was not."""
+    if value and value.strip():
+        return value
+    if opik_url and opik_url.strip():
+        print("[INFO] TRACE_TO_OPIK unset; OPIK_URL present -> tracing on", file=sys.stderr)
+        return "true"
+    print("[INFO] TRACE_TO_OPIK unset; no OPIK_URL -> tracing off", file=sys.stderr)
+    return "false"
 
 
 def positive_int(value: str) -> int:
@@ -129,7 +144,7 @@ def load_runner_config() -> dict[str, str]:
         "MODEL": shared_model(),
         "BASE_URL": shared("BASE_URL"),
         "API_KEY": shared("API_KEY"),
-        "TRACE_TO_OPIK": shared("TRACE_TO_OPIK", "true"),
+        "TRACE_TO_OPIK": shared("TRACE_TO_OPIK"),
         "PINCHBENCH_MODEL_PROVIDER": "auto",
         "PINCHBENCH_TIMEOUT_MULTIPLIER": "1.0",
         "JUDGE_MODEL": "",
@@ -158,10 +173,15 @@ def load_runner_config() -> dict[str, str]:
     # This is a fleet-wide switch, not a PinchBench-specific setting. Keep it
     # on the shared config precedence chain even if an old runner file happens
     # to contain a conflicting key; the caller environment still wins below.
-    config["TRACE_TO_OPIK"] = shared("TRACE_TO_OPIK", "true")
+    config["TRACE_TO_OPIK"] = shared("TRACE_TO_OPIK")
     for key in config:
         if key in os.environ:
             config[key] = os.environ[key]
+    # OPIK_URL follows the same precedence but is not part of the worker config.
+    config["TRACE_TO_OPIK"] = resolve_trace_to_opik(
+        config["TRACE_TO_OPIK"],
+        os.environ.get("OPIK_URL") or shared("OPIK_URL"),
+    )
     for key in ("PINCHBENCH_DIR", "PINCHBENCH_OUTPUT_DIR", "PINCHBENCH_UV_CACHE_DIR"):
         config[key] = expand_path(config[key], relative_to=REPO_ROOT)
     for key in ("CONFIG_BASE", "WORKSPACE_BASE"):

@@ -42,7 +42,7 @@ class AnsibleFleetTemplateTests(unittest.TestCase):
             trace_lines,
             [
                 (
-                    "TRACE_TO_OPIK={{ 'false' if (trace_to_opik | default(true) | string | lower) "
+                    "TRACE_TO_OPIK={{ 'false' if (trace_to_opik | default(false) | string | lower) "
                     "in ['false', '0'] else 'true' }}"
                 ),
             ],
@@ -262,6 +262,39 @@ class ResolveConfigTests(unittest.TestCase):
         self.assertEqual(cfg["TRACE_TO_OPIK"], "false")
         self.assertEqual(cfg["OPIK_PLUGIN"], "disabled")
         setup.validate_required(cfg)
+
+    def test_absent_trace_switch_follows_configured_opik_url(self):
+        env = {
+            "BASE_URL": "u",
+            "API_KEY": "k",
+            "HOME": "/h",
+            "OPIK_URL": "https://opik.example.invalid/api",
+        }
+
+        cfg = setup.resolve_config(env, [])
+
+        self.assertEqual(cfg["TRACE_TO_OPIK"], "true")
+
+    def test_absent_trace_switch_without_opik_url_disables_tracing(self):
+        env = {"BASE_URL": "u", "API_KEY": "k", "HOME": "/h"}
+
+        cfg = setup.resolve_config(env, [])
+
+        self.assertEqual(cfg["TRACE_TO_OPIK"], "false")
+        self.assertEqual(cfg["OPIK_PLUGIN"], "disabled")
+
+    def test_explicit_trace_switch_wins_over_opik_url(self):
+        env = {
+            "BASE_URL": "u",
+            "API_KEY": "k",
+            "HOME": "/h",
+            "OPIK_URL": "https://opik.example.invalid/api",
+            "TRACE_TO_OPIK": "false",
+        }
+
+        cfg = setup.resolve_config(env, [])
+
+        self.assertEqual(cfg["TRACE_TO_OPIK"], "false")
 
     def test_cli_count_overrides_env(self):
         env = {"COUNT": "2", "BASE_URL": "u", "API_KEY": "k", "HOME": "/h"}

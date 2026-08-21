@@ -26,8 +26,11 @@ def _exec_with_repository_config() -> None:
     if os.environ.get("AGENT_FLEET_CONFIG_LOADED_ROOT") == str(repo_root):
         return
     loader = repo_root / "scripts" / "config_loader.sh"
+    # Controller output is parsed as JSON by monitor_harbor.sh and the fixer, so
+    # config loading must stay silent even when it derives a value.
     command = (
-        'set -euo pipefail; source "$1"; agent_fleet_load_config "$2"; '
+        'set -euo pipefail; export AGENT_FLEET_CONFIG_QUIET=1; '
+        'source "$1"; agent_fleet_load_config "$2"; '
         'python_bin="$3"; shift 3; exec "$python_bin" "$@"'
     )
     os.execvp(

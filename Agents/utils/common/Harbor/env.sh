@@ -133,12 +133,14 @@ HARBOR_FIXER_SUMMARY_LIMIT="${HARBOR_FIXER_SUMMARY_LIMIT:-4000}"
 HARBOR_FIXER_MAX_CONCURRENCY="${HARBOR_FIXER_MAX_CONCURRENCY:-4}"
 HARBOR_FIXER_MAX_TASK_SUMMARY_CHARS="${HARBOR_FIXER_MAX_TASK_SUMMARY_CHARS:-24000}"
 HARBOR_FIXER_MAX_TASK_SUMMARIES_CHARS="${HARBOR_FIXER_MAX_TASK_SUMMARIES_CHARS:-400000}"
-TRACE_TO_OPIK="${TRACE_TO_OPIK:-true}"
+# agent_fleet_load_config already resolved this from OPIK_URL when the switch
+# was absent. The floor below only covers env.sh being sourced without it.
+TRACE_TO_OPIK="${TRACE_TO_OPIK:-false}"
 # The single switch for running without Opik, shared by every script that
 # sources env.sh (harboropik.sh, run_harbor_worker.sh). Anything except an
-# explicit false/0 keeps tracing on, so default behavior is unchanged.
+# explicit false/0 keeps tracing on.
 harbor_trace_to_opik_enabled() {
-  case "${TRACE_TO_OPIK:-true}" in
+  case "${TRACE_TO_OPIK:-false}" in
     false|0) return 1 ;;
     *) return 0 ;;
   esac
@@ -342,7 +344,7 @@ HARBOR_FORCE_BUILD="${HARBOR_FORCE_BUILD:-0}"
 HARBOR_DEBUG="${HARBOR_DEBUG:-0}"
 # The realtime hook default follows the tracing switch: without an Opik
 # server there is nothing for the hook to talk to. An explicit value wins.
-case "${TRACE_TO_OPIK:-true}" in
+case "${TRACE_TO_OPIK:-false}" in
   false|0) HARBOR_CC_OPIK_ENABLE_HOOK="${HARBOR_CC_OPIK_ENABLE_HOOK:-0}" ;;
   *) HARBOR_CC_OPIK_ENABLE_HOOK="${HARBOR_CC_OPIK_ENABLE_HOOK:-1}" ;;
 esac

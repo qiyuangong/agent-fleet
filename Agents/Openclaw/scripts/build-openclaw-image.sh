@@ -32,11 +32,17 @@ done
 eval "$__caller_env"
 unset __caller_env config_file
 
+# This script keeps its own precedence chain (it layers in fleet.env), so
+# resolve the tracing switch here rather than through agent_fleet_load_config.
+# shellcheck source=../../../scripts/config_loader.sh
+. "$REPO_ROOT/scripts/config_loader.sh"
+agent_fleet_resolve_trace_to_opik
+
 OPENCLAW_REPO="${OPENCLAW_REPO:-https://github.com/openclaw/openclaw.git}"
 
 # Keep the top-level tracing switch authoritative over stale fleet/plugin
 # configuration, matching setup.py and the benchmark launchers.
-case "${TRACE_TO_OPIK:-true}" in
+case "$TRACE_TO_OPIK" in
   false|0)
     if [ "${OPIK_PLUGIN:-}" = "enabled" ]; then
       echo "TRACE_TO_OPIK=false overrides OPIK_PLUGIN=enabled; tracing plugin disabled" >&2

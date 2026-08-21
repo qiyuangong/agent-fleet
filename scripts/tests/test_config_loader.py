@@ -20,6 +20,8 @@ CONFIG_NAMES = (
     "HARBOR_ANTHROPIC_AUTH_TOKEN",
     "HARBOR_ANALYZER_BASE_URL",
     "HARBOR_ANALYZER_MODEL",
+    "TRACE_TO_OPIK",
+    "OPIK_URL",
     "ROLLOUT",
     "RL_ENV_FILE",
     "RL_API_BASE",
@@ -100,6 +102,59 @@ class ConfigLoaderTest(unittest.TestCase):
             runtime.stdout,
             "https://runtime.example.invalid|fake-runtime-key|runtime-model",
         )
+
+    def test_absent_trace_switch_follows_configured_opik_url(self):
+        self.write_configs("", "OPIK_URL=https://opik.example.invalid/api\n")
+
+        result = self.run_loader(
+            'agent_fleet_load_config "$2"; printf "%s" "$TRACE_TO_OPIK"'
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "true")
+        self.assertIn("OPIK_URL present -> tracing on", result.stderr)
+
+    def test_absent_trace_switch_without_opik_url_disables_tracing(self):
+        self.write_configs("", "")
+
+        result = self.run_loader(
+            'agent_fleet_load_config "$2"; printf "%s" "$TRACE_TO_OPIK"'
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "false")
+        self.assertIn("no OPIK_URL -> tracing off", result.stderr)
+
+    def test_explicit_trace_switch_wins_over_opik_url(self):
+        self.write_configs(
+            "",
+            "OPIK_URL=https://opik.example.invalid/api\nTRACE_TO_OPIK=false\n",
+        )
+
+        saved = self.run_loader(
+            'agent_fleet_load_config "$2"; printf "%s" "$TRACE_TO_OPIK"'
+        )
+        runtime = self.run_loader(
+            'agent_fleet_load_config "$2"; printf "%s" "$TRACE_TO_OPIK"',
+            extra_env={"TRACE_TO_OPIK": "true"},
+        )
+
+        self.assertEqual(saved.returncode, 0, saved.stderr)
+        self.assertEqual(saved.stdout, "false")
+        self.assertNotIn("TRACE_TO_OPIK unset", saved.stderr)
+        self.assertEqual(runtime.returncode, 0, runtime.stderr)
+        self.assertEqual(runtime.stdout, "true")
+
+    def test_resolved_trace_switch_is_exported_to_children(self):
+        self.write_configs("", "OPIK_URL=https://opik.example.invalid/api\n")
+
+        result = self.run_loader(
+            'agent_fleet_load_config "$2"; '
+            'bash -c "printf %s \\"\\$TRACE_TO_OPIK\\""'
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "true")
 
     def test_tool_aliases_do_not_override_saved_canonical_config(self):
         self.write_configs(

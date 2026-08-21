@@ -86,7 +86,7 @@ provider derives from `BASE_URL` when `PI_PROVIDER` is unset. Rollout mode
 keeps its separate `RL_TEMPERATURE`, `RL_TOP_P`, and `RL_MAX_NEW_TOKENS`
 interface.
 
-When `TRACE_TO_OPIK=true` (the default), the Opik tracing plugin is loaded from
+When `TRACE_TO_OPIK=true`, the Opik tracing plugin is loaded from
 the `third_party/agent-opik-plugin` submodule. Initialize it before a traced run:
 
 ```bash

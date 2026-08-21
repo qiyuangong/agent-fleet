@@ -2,11 +2,13 @@
 set -euo pipefail
 
 OPENCLAW_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_ROOT="$(cd "$OPENCLAW_DIR/../.." && pwd)"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
 PROJECT_DIR="$TMP_DIR/Agents/Openclaw"
-mkdir -p "$PROJECT_DIR/scripts" \
+mkdir -p "$TMP_DIR/scripts" \
+         "$PROJECT_DIR/scripts" \
          "$PROJECT_DIR/cache/openclaw/.git" \
          "$TMP_DIR/third_party/agent-opik-plugin/harness/openclaw" \
          "$TMP_DIR/third_party/agent-opik-plugin/src/sii_opik_plugin/openclaw" \
@@ -16,6 +18,8 @@ touch "$TMP_DIR/third_party/agent-opik-plugin/requirements.txt"
 printf '{"scripts":{"build":"true"}}\n' > "$TMP_DIR/third_party/agent-opik-plugin/harness/openclaw/package.json"
 
 cp "$OPENCLAW_DIR/scripts/build-openclaw-image.sh" "$PROJECT_DIR/scripts/build-openclaw-image.sh"
+# The build script resolves the tracing switch through the shared config lib.
+cp "$REPO_ROOT/scripts/config_loader.sh" "$TMP_DIR/scripts/config_loader.sh"
 cp "$OPENCLAW_DIR/Dockerfile.opik" "$PROJECT_DIR/Dockerfile.opik"
 chmod +x "$PROJECT_DIR/scripts/build-openclaw-image.sh"
 
@@ -48,6 +52,7 @@ chmod +x "$TMP_DIR/bin/git" "$TMP_DIR/bin/docker" "$TMP_DIR/bin/npm"
 
 PATH="$TMP_DIR/bin:$PATH" \
 LOG="$LOG" \
+TRACE_TO_OPIK=true \
 OPIK_PLUGIN=enabled \
 NPM_CONFIG_REGISTRY="https://registry.npmmirror.com" \
 PIP_INDEX_URL="https://pypi.tuna.tsinghua.edu.cn/simple" \
@@ -108,3 +113,30 @@ OPIK_PLUGIN=enabled \
 "$PROJECT_DIR/scripts/build-openclaw-image.sh" >/dev/null
 
 grep -q -- 'openclaw:local-opik' "$LOG"
+
+# Without the switch, a configured Opik endpoint is what turns tracing on.
+rm -f "$TMP_DIR/config.local.env"
+: > "$LOG"
+env -u TRACE_TO_OPIK \
+  PATH="$TMP_DIR/bin:$PATH" \
+  LOG="$LOG" \
+  OPIK_URL="https://opik.example.invalid/api" \
+  OPIK_PLUGIN=enabled \
+  "$PROJECT_DIR/scripts/build-openclaw-image.sh" >/dev/null
+
+grep -q -- 'openclaw:local-opik' "$LOG"
+
+# Without the switch and without an endpoint, tracing stays off.
+: > "$LOG"
+env -u TRACE_TO_OPIK -u OPIK_URL \
+  PATH="$TMP_DIR/bin:$PATH" \
+  LOG="$LOG" \
+  OPIK_PLUGIN=enabled \
+  TRACE_PLUGIN_SOURCE_DIR="$TMP_DIR/missing-opik-plugin" \
+  "$PROJECT_DIR/scripts/build-openclaw-image.sh" >/dev/null 2>&1
+
+grep -q -- 'build --load -t openclaw:local ' "$LOG"
+if grep -q -- 'openclaw:local-opik' "$LOG"; then
+  echo "derived trace-off unexpectedly built the Opik image" >&2
+  exit 1
+fi

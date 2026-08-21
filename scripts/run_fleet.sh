@@ -65,7 +65,7 @@ validate_run_config() {
   for required in BASE_URL API_KEY MODEL; do
     [[ -n "${!required:-}" ]] || missing+=("$required")
   done
-  case "${TRACE_TO_OPIK:-true}" in
+  case "${TRACE_TO_OPIK:-false}" in
     false|0) ;;
     *) [[ -n "${OPIK_URL:-}" ]] || missing+=("OPIK_URL (required when TRACE_TO_OPIK=true)") ;;
   esac

@@ -349,6 +349,62 @@ class BenchmarkCommandTests(unittest.TestCase):
         self.assertEqual(config["MODEL"], "shared-model")
         self.assertEqual(config["TRACE_TO_OPIK"], "false")
 
+    def resolve_trace_switch_from_configs(self, shared_config, env):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            config_env = tmp_path / "config.env"
+            config_local_env = tmp_path / "config.local.env"
+            fleet_env = tmp_path / "fleet.env"
+            generated_env = tmp_path / ".env"
+            pinchbench_env = tmp_path / "pinchbench.env"
+            config_env.write_text(shared_config, encoding="utf-8")
+            config_local_env.write_text("", encoding="utf-8")
+            fleet_env.write_text("", encoding="utf-8")
+            generated_env.write_text("", encoding="utf-8")
+            pinchbench_env.write_text("", encoding="utf-8")
+
+            with mock.patch.object(self.runner, "CONFIG_ENV_FILE", config_env), \
+                 mock.patch.object(self.runner, "CONFIG_LOCAL_ENV_FILE", config_local_env), \
+                 mock.patch.object(self.runner, "FLEET_ENV_FILE", fleet_env), \
+                 mock.patch.object(self.runner, "ENV_FILE", generated_env), \
+                 mock.patch.object(self.runner, "PINCHBENCH_ENV_FILE", pinchbench_env), \
+                 mock.patch.dict(self.runner.os.environ, env, clear=True):
+                return self.runner.load_runner_config()["TRACE_TO_OPIK"]
+
+    def test_absent_trace_switch_follows_configured_opik_url(self):
+        self.assertEqual(
+            self.resolve_trace_switch_from_configs(
+                "OPIK_URL=https://opik.example.invalid/api\n", {}
+            ),
+            "true",
+        )
+
+    def test_absent_trace_switch_without_opik_url_disables_tracing(self):
+        self.assertEqual(self.resolve_trace_switch_from_configs("", {}), "false")
+
+    def test_caller_opik_url_enables_tracing_over_empty_config(self):
+        self.assertEqual(
+            self.resolve_trace_switch_from_configs(
+                "", {"OPIK_URL": "https://opik.example.invalid/api"}
+            ),
+            "true",
+        )
+
+    def test_explicit_trace_switch_wins_over_opik_url(self):
+        self.assertEqual(
+            self.resolve_trace_switch_from_configs(
+                "OPIK_URL=https://opik.example.invalid/api\nTRACE_TO_OPIK=false\n", {}
+            ),
+            "false",
+        )
+        self.assertEqual(
+            self.resolve_trace_switch_from_configs(
+                "OPIK_URL=https://opik.example.invalid/api\n",
+                {"TRACE_TO_OPIK": "false"},
+            ),
+            "false",
+        )
+
     def test_runner_config_resolves_relative_local_repo_url_from_repo_root(self):
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -446,9 +502,11 @@ class BenchmarkCommandTests(unittest.TestCase):
         )
 
         self.assertIn("/opt/opik-venv", dockerfile)
-        self.assertIn("ARG OPENCLAW_BASE_IMAGE=openclaw:local-opik", dockerfile)
+        # Opik is opt-in, so a manual build without --build-arg must produce the
+        # untraced pair. The runner always passes both args explicitly.
+        self.assertIn("ARG OPENCLAW_BASE_IMAGE=openclaw:local", dockerfile)
         self.assertIn("FROM ${OPENCLAW_BASE_IMAGE}", dockerfile)
-        self.assertIn('ARG TRACE_TO_OPIK=true', dockerfile)
+        self.assertIn('ARG TRACE_TO_OPIK=false', dockerfile)
         self.assertIn("/opt/pinchbench-trace-to-opik", dockerfile)
         self.assertNotIn("cache/" + "sii-opik", dockerfile)
         self.assertIn("opik>=1.0.0", dockerfile)

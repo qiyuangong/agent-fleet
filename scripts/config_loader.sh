@@ -40,6 +40,37 @@ agent_fleet_load_config() {
 
   AGENT_FLEET_CONFIG_LOADED_ROOT="$repo_root"
   export AGENT_FLEET_CONFIG_LOADED_ROOT
+
+  agent_fleet_resolve_trace_to_opik
+}
+
+# Opik is optional, so an absent switch must not demand an Opik server. Derive
+# it from OPIK_URL instead: a configured endpoint means tracing was wanted, no
+# endpoint means it was not. Callers that load their own config files (the
+# OpenClaw image build, the ClawBio launcher) source this library for the helper
+# and call it once their own precedence chain has been applied.
+#
+# Only the derivation is announced; an explicit switch stays silent. Tools whose
+# output is parsed rather than read (the Harbor controller emits JSON) set
+# AGENT_FLEET_CONFIG_QUIET=1 so a repeated diagnostic cannot reach their callers.
+agent_fleet_resolve_trace_to_opik() {
+  if [[ -n "${TRACE_TO_OPIK:-}" ]]; then
+    export TRACE_TO_OPIK
+    return 0
+  fi
+
+  local reason
+  if [[ -n "${OPIK_URL:-}" ]]; then
+    TRACE_TO_OPIK=true
+    reason="OPIK_URL present -> tracing on"
+  else
+    TRACE_TO_OPIK=false
+    reason="no OPIK_URL -> tracing off"
+  fi
+  if [[ "${AGENT_FLEET_CONFIG_QUIET:-0}" != "1" ]]; then
+    echo "[INFO] TRACE_TO_OPIK unset; $reason" >&2
+  fi
+  export TRACE_TO_OPIK
 }
 
 # AUTH_TOKEN is a documented fleet-runner credential alias, not a general

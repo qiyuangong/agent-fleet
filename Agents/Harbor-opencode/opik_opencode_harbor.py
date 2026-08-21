@@ -86,7 +86,7 @@ def _trace_to_opik_enabled(extra_env: dict[str, str] | None = None) -> bool:
     if extra_env is not None:
         value = extra_env.get("TRACE_TO_OPIK")
     if value is None:
-        value = os.environ.get("TRACE_TO_OPIK", "true")
+        value = os.environ.get("TRACE_TO_OPIK", "false")
     return value not in {"false", "0"}
 
 

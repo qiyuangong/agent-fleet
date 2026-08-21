@@ -75,7 +75,7 @@ DEFAULT_PORTS_OFFSET="100" \
 | `WORKSPACE_ONLY` | `true` | Default value for `tools.fs.workspaceOnly`; set `false` to let skills read outside the workspace (e.g. plugin/extension dirs) |
 | `DOCKER_COMPOSE_READ_ONLY` | `true` | Default value for generated Compose `read_only` |
 | `OPENCLAW_IMAGE` | `openclaw:local` | Docker image to use |
-| `TRACE_TO_OPIK` | `true` | Fleet-wide tracing switch; `false` forces the OpenClaw plugin off |
+| `TRACE_TO_OPIK` | _(follows `OPIK_URL`)_ | Fleet-wide tracing switch; unset means on only when `OPIK_URL` is set. `false` forces the OpenClaw plugin off |
 | `OPIK_PLUGIN` | `disabled` | Set to `enabled` to activate opik tracing |
 | `OPIK_URL` | _(none)_ | Opik API endpoint (required when `OPIK_PLUGIN=enabled`) |
 | `OPIK_PROJECT_NAME` | _(none)_ | Opik project name (required when `OPIK_PLUGIN=enabled`) |

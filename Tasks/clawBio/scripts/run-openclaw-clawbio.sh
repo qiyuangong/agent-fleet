@@ -197,11 +197,17 @@ Use it only for the generated ClawBio fleet. The profile remains active until
 that fleet is stopped or regenerated.
 EOF
 
+# This launcher keeps its own precedence chain (fleet.env and the ClawBio
+# profile layer on top), so resolve the tracing switch once it is complete.
+# shellcheck source=../../../scripts/config_loader.sh
+. "$REPO_ROOT/scripts/config_loader.sh"
+agent_fleet_resolve_trace_to_opik
+
 # TRACE_TO_OPIK is the authoritative switch documented in the root README:
 # tracing off forces the plugin off, even over an explicit
 # OPIK_PLUGIN=enabled lingering in fleet.env or another config file. With
 # tracing on, an explicit OPIK_PLUGIN still wins and the default is enabled.
-case "${TRACE_TO_OPIK:-true}" in
+case "$TRACE_TO_OPIK" in
   false|0)
     if [[ "$OPIK_PLUGIN" == "enabled" ]]; then
       echo "TRACE_TO_OPIK=false overrides OPIK_PLUGIN=enabled; tracing plugin disabled" >&2
@@ -259,7 +265,7 @@ elif [[ "$OPIK_PLUGIN" == "enabled" ]] && ! image_exists "openclaw:local-opik"; 
 fi
 
 if [[ "$need_build" -eq 1 ]]; then
-  TRACE_TO_OPIK="${TRACE_TO_OPIK:-true}" \
+  TRACE_TO_OPIK="$TRACE_TO_OPIK" \
     OPIK_PLUGIN="$OPIK_PLUGIN" \
     "$OPENCLAW_DIR/scripts/build-openclaw-image.sh"
 elif [[ "$OPIK_PLUGIN" == "enabled" ]]; then
@@ -271,7 +277,7 @@ fi
 "$BENCH_DIR/scripts/prewarm-cache.sh" --cache-dir "$PLUGIN_CACHE_DIR"
 
 env_args=(
-  "TRACE_TO_OPIK=${TRACE_TO_OPIK:-true}"
+  "TRACE_TO_OPIK=$TRACE_TO_OPIK"
   "OPIK_PLUGIN=$OPIK_PLUGIN"
   "OPENCLAW_UID=$OPENCLAW_UID"
   "OPENCLAW_GID=$OPENCLAW_GID"

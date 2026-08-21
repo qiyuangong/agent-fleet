@@ -132,6 +132,46 @@ exit "${STUB_EXIT:-0}"
         self.assertIn("HARBOR_N_CONCURRENT=3", result.stdout)
         self.assertIn("RUN_ID=\n", result.stdout)
 
+    def write_local_config(self, trailer=""):
+        (self.repo / "config.local.env").write_text(
+            "BASE_URL=https://gateway.example.invalid\n"
+            "API_KEY=fake-runner-key\n"
+            "MODEL=test-model\n" + trailer,
+            encoding="utf-8",
+        )
+
+    def test_absent_trace_switch_without_opik_url_does_not_require_opik(self):
+        self.write_local_config()
+
+        result = self.run_fleet(
+            "--taskset", "terminal-bench/terminal-bench-2-1", "--agent", "claude-code"
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("runner=harbor", result.stdout)
+        self.assertNotIn("missing required configuration", result.stderr)
+        self.assertIn("no OPIK_URL -> tracing off", result.stderr)
+
+    def test_absent_trace_switch_with_opik_url_enables_tracing(self):
+        self.write_local_config("OPIK_URL=https://opik.example.invalid/api\n")
+
+        result = self.run_fleet(
+            "--taskset", "terminal-bench/terminal-bench-2-1", "--agent", "claude-code"
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("OPIK_URL present -> tracing on", result.stderr)
+
+    def test_explicit_trace_switch_without_opik_url_still_fails(self):
+        self.write_local_config("TRACE_TO_OPIK=true\n")
+
+        result = self.run_fleet(
+            "--taskset", "terminal-bench/terminal-bench-2-1", "--agent", "claude-code"
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("OPIK_URL (required when TRACE_TO_OPIK=true)", result.stderr)
+
     def test_explicit_local_taskset_maps_only_path_inputs(self):
         result = self.run_fleet("--taskset", "./tasks", "--agent", "opencode")
         self.assertEqual(result.returncode, 0, result.stderr)

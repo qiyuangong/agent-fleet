@@ -1,4 +1,4 @@
-ARG OPENCLAW_BASE_IMAGE=openclaw:local-opik
+ARG OPENCLAW_BASE_IMAGE=openclaw:local
 FROM ${OPENCLAW_BASE_IMAGE}
 
 LABEL org.opencontainers.image.source="https://github.com/pinchbench/skill"
@@ -7,7 +7,7 @@ LABEL org.opencontainers.image.description="PinchBench runner with OpenClaw CLI"
 ARG PIP_INDEX_URL=""
 ARG PIP_EXTRA_INDEX_URL=""
 ARG PIP_TRUSTED_HOST=""
-ARG TRACE_TO_OPIK=true
+ARG TRACE_TO_OPIK=false
 
 USER root
 

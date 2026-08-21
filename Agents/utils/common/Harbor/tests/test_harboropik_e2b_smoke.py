@@ -174,6 +174,9 @@ class HarborOpikE2BSmokeTest(unittest.TestCase):
                     "RL_AGENT": "oracle",
                     "ROLLOUT": "1",
                     "RUNTIME_DIR": root,
+                    # These assert on exact output; pin the switch so env.sh has
+                    # nothing to derive and report.
+                    "TRACE_TO_OPIK": "false",
                 }
             )
             command = (
@@ -205,6 +208,7 @@ class HarborOpikE2BSmokeTest(unittest.TestCase):
                     "RL_ENVIRONMENT_TYPE": "e2b",
                     "HARBOR_ENVIRONMENT_TYPE": "e2b",
                     "RUNTIME_DIR": root,
+                    "TRACE_TO_OPIK": "false",
                 }
             )
             command = (
@@ -234,6 +238,7 @@ class HarborOpikE2BSmokeTest(unittest.TestCase):
                     "DATASET_NAME": "auto",
                     "DATASET_PATH": root,
                     "OUTPUT_PATH": str(Path(root) / "output"),
+                    "TRACE_TO_OPIK": "false",
                 }
             )
             completed = subprocess.run(

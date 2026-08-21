@@ -71,7 +71,23 @@ def _build_arg_parser(defaults: dict[str, str]) -> argparse.ArgumentParser:
 
 def trace_to_opik_enabled(value: str | None) -> bool:
     """Return whether fleet-wide tracing is enabled."""
-    return (value or "true") not in {"false", "0"}
+    return (value or "false") not in {"false", "0"}
+
+
+def resolve_trace_to_opik(env: dict[str, str]) -> str:
+    """Resolve the fleet-wide switch the way scripts/config_loader.sh does.
+
+    Opik is optional, so an absent switch must not demand an Opik server.
+    A configured OPIK_URL means tracing was wanted, no endpoint means it
+    was not."""
+    value = env.get("TRACE_TO_OPIK", "")
+    if value.strip():
+        return value
+    if env.get("OPIK_URL", "").strip():
+        print("[INFO] TRACE_TO_OPIK unset; OPIK_URL present -> tracing on", file=sys.stderr)
+        return "true"
+    print("[INFO] TRACE_TO_OPIK unset; no OPIK_URL -> tracing off", file=sys.stderr)
+    return "false"
 
 
 def resolve_config(env: dict[str, str], argv: list[str]) -> dict[str, Any]:
@@ -108,7 +124,7 @@ def resolve_config(env: dict[str, str], argv: list[str]) -> dict[str, Any]:
         "COUNT": env.get("COUNT", "2"),
         "BASE_URL": env.get("BASE_URL", ""),
         "API_KEY": env.get("API_KEY", ""),
-        "TRACE_TO_OPIK": env.get("TRACE_TO_OPIK", "true"),
+        "TRACE_TO_OPIK": resolve_trace_to_opik(env),
         "OPIK_PLUGIN": env.get("OPIK_PLUGIN", "disabled"),
         "OPIK_URL": env.get("OPIK_URL", ""),
         "OPIK_API_KEY": env.get("OPIK_API_KEY", ""),

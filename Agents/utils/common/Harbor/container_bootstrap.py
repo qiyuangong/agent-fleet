@@ -22,8 +22,16 @@ class NpmToolSpec:
     npm_registry: str = ""
 
 
-def build_python_runtime_command(wheel_dir: str) -> str:
+def build_python_runtime_command(
+    wheel_dir: str, *, python_required: bool = True
+) -> str:
     wheel_dir_q = shlex.quote(wheel_dir)
+    missing_python_exit_code = 1 if python_required else 0
+    missing_python_message = (
+        "[ERROR] python missing after runtime setup"
+        if python_required
+        else "[WARN] python missing, skip opik hook deps"
+    )
     return textwrap.dedent(
         rf"""
         set -euo pipefail
@@ -71,7 +79,10 @@ def build_python_runtime_command(wheel_dir: str) -> str:
         if [ -x /usr/bin/python3 ] && python_works /usr/bin/python3; then
           ln -sf /usr/bin/python3 /usr/local/bin/python3
         fi
-        python_works python3
+        if ! python_works python3; then
+          echo {shlex.quote(missing_python_message)} >&2
+          exit {missing_python_exit_code}
+        fi
         """
     ).lstrip()
 
@@ -285,10 +296,17 @@ def build_python_dependencies_command(
     *,
     wheel_dir: str,
     wheel_url: str,
+    python_required: bool = True,
 ) -> str:
     wheel_dir_q = shlex.quote(wheel_dir)
     wheel_url_q = shlex.quote(wheel_url)
     modules_repr = repr(tuple(modules))
+    missing_python_exit_code = 1 if python_required else 0
+    missing_python_message = (
+        "[ERROR] python missing for hook dependencies"
+        if python_required
+        else "[WARN] python missing, skip opik hook deps"
+    )
     return textwrap.dedent(
         rf"""
         set -euo pipefail
@@ -304,8 +322,8 @@ def build_python_dependencies_command(
           break
         done
         if [ -z "$py_bin" ]; then
-          echo '[WARN] python missing for hook dependencies' >&2
-          exit 1
+          echo {shlex.quote(missing_python_message)} >&2
+          exit {missing_python_exit_code}
         fi
         wheel_dir={wheel_dir_q}
         wheel_url={wheel_url_q}

@@ -124,6 +124,7 @@ class ClaudeInstallCommandTest(unittest.TestCase):
             async def exec_as_root(
                 self, environment, command=None, env=None, cwd=None, timeout_sec=None
             ):
+                captured.append(command)
                 return command
 
             async def exec_as_agent(
@@ -232,6 +233,31 @@ class ClaudeInstallCommandTest(unittest.TestCase):
             check=False,
         )
         self.assertEqual(bash_check.returncode, 0, bash_check.stderr)
+
+    def test_missing_python_skips_hook_dependencies_without_aborting_install(self) -> None:
+        commands = self._install_commands(
+            {
+                "CC_OPIK_ENABLE_HOOK": "true",
+                "CC_OPIK_INSTALL_DEPS": "true",
+                "OPIK_URL": "https://opik.example.invalid/api",
+            }
+        )
+        runtime_command = next(
+            item for item in commands if "python_works()" in item
+        )
+        dependencies_command = next(
+            item
+            for item in commands
+            if "mods = ('opik', 'uuid6', 'socksio')" in item
+        )
+
+        warning = "echo '[WARN] python missing, skip opik hook deps' >&2"
+        self.assertIn(warning, runtime_command)
+        self.assertIn(warning, dependencies_command)
+        self.assertIn("exit 0", runtime_command[runtime_command.index(warning) :])
+        self.assertIn(
+            "exit 0", dependencies_command[dependencies_command.index(warning) :]
+        )
 
 
 class QzInstructionHookGateTest(unittest.TestCase):

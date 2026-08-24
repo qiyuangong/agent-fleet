@@ -309,7 +309,9 @@ def _patch_claude_code_realtime_hooks() -> None:
         wheel_url = (extra_env or {}).get("HARBOR_LOCAL_WHEEL_SERVER_URL", "")
         await self.exec_as_root(
             environment,
-            command=container_bootstrap.build_python_runtime_command(wheel_dir),
+            command=container_bootstrap.build_python_runtime_command(
+                wheel_dir, python_required=False
+            ),
             env={"DEBIAN_FRONTEND": "noninteractive"},
         )
         await self.exec_as_agent(
@@ -318,6 +320,7 @@ def _patch_claude_code_realtime_hooks() -> None:
                 ("opik", "uuid6", "socksio"),
                 wheel_dir=wheel_dir,
                 wheel_url=wheel_url,
+                python_required=False,
             ),
         )
 

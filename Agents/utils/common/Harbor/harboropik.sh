@@ -1622,6 +1622,9 @@ main() {
   harbor_validate_generation_controls
   validate_environment_backend
   configure_trace_disabled_runtime
+  if [[ "$HARBOR_DRY_RUN" != "1" ]]; then
+    harbor_validate_dataset_runtime_requirements
+  fi
   harbor_init_run_dirs
   if ! harbor_agent_is_oracle && harbor_trace_to_opik_enabled; then
     normalize_opik_url_override

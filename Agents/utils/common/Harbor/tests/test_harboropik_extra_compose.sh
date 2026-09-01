@@ -281,6 +281,7 @@ run_harboropik() {
   local min_test="${9:-0}"
   local runs="${10:-1}"
   local n_concurrent="${11:-1}"
+  local gemini_api_key="${12:-}"
   local opik_base="http://opik.example"
   local opik_url_override="http://opik.example/api"
   local hook_flag="1"
@@ -330,6 +331,7 @@ run_harboropik() {
     OPIK_API_KEY="fake-opik-key" \
     BASE_URL="http://llm.example" \
     API_KEY="fake-llm-key" \
+    GEMINI_API_KEY="$gemini_api_key" \
     MODEL="fake-model" \
     MIN_TEST="$min_test" \
     MIN_TEST_INCLUDE_TASK="fix-git" \
@@ -400,6 +402,7 @@ main() {
   local seta_capture sweverify_capture registry_capture traceoff_capture traceoff_oc_capture
   local opencode_registry_capture opencode_local_capture
   local min_test_capture
+  local deepsearchqa_capture
   tmp="$(mktemp -d)"
   TEST_TMP_DIR="$tmp"
   trap 'rm -rf "$TEST_TMP_DIR"' EXIT
@@ -433,6 +436,16 @@ main() {
   assert_file_content "${registry_capture}.pid-identity" "valid"
   assert_registry_summary "$tmp/claude-registry/run/summary.txt"
   assert_registry_summary_requires_result "$tmp/registry-missing-result"
+
+  deepsearchqa_capture="$tmp/deepsearchqa.args"
+  run_harboropik \
+    "claude-code" "$capture_bin" "$deepsearchqa_capture" "$tmp/deepsearchqa" \
+    "deepsearchqa" "" "true" "1" "0" "1" "1" "fake-judge-key"
+  assert_arg_pair "$deepsearchqa_capture" "--dataset" "kgmon/deepsearchqa"
+  assert_arg_pair \
+    "$deepsearchqa_capture" \
+    "--ak" \
+    "disallowed_tools=RemoteTrigger AskUserQuestion"
 
   opencode_capture="$tmp/opencode-default.args"
   run_harboropik \

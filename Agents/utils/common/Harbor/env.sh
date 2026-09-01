@@ -42,9 +42,10 @@ PI_PROVIDER="${PI_PROVIDER:-}"
 
 HARBOR_ROOT="${HARBOR_ROOT:-/workspace/harbor}"
 # Dataset selection:
-#   DATASET_NAME: auto, seta, smith, terminalbench21, sweverify,
+#   DATASET_NAME: auto, deepsearchqa, seta, smith, terminalbench21, sweverify,
 #     or a Harbor registry dataset id such as owner/name or owner/name@version.
-#     seta, terminalbench21, and sweverify are registry aliases. smith is local.
+#     deepsearchqa, seta, terminalbench21, and sweverify are registry aliases.
+#     smith is local.
 #     For a local/offline checkout, use auto so the dataset is inferred from
 #     DATASET_PATH.
 #   DATASET_PATH examples:
@@ -57,6 +58,7 @@ DATASET_NAME="${DATASET_NAME:-auto}"
 DATASET_PATH="${DATASET_PATH:-/workspace/seta-env/Harbor-Dataset}"
 METRIC_MODE="${METRIC_MODE:-auto}"
 HARBOR_TERMINALBENCH21_REGISTRY_ID="terminal-bench/terminal-bench-2-1"
+HARBOR_DEEPSEARCHQA_REGISTRY_ID="kgmon/deepsearchqa"
 
 # Host-direct runs must not assume that the caller can write to /workspace.
 # The checkout-local runs directory is ignored by git, mounted at the same path
@@ -259,7 +261,14 @@ HARBOR_RETRY_EXCLUDE_EXCEPTIONS="${HARBOR_RETRY_EXCLUDE_EXCEPTIONS-RewardFileNot
 HARBOR_AK_MAX_TURNS="${HARBOR_AK_MAX_TURNS:-}"
 HARBOR_AK_COLLECT_ROLLOUT_DETAILS="${HARBOR_AK_COLLECT_ROLLOUT_DETAILS:-}"
 HARBOR_AK_ENABLE_SUMMARIZE="${HARBOR_AK_ENABLE_SUMMARIZE:-}"
-HARBOR_DISALLOWED_TOOLS="${HARBOR_DISALLOWED_TOOLS:-WebSearch WebFetch RemoteTrigger AskUserQuestion}"
+_HARBOR_DEFAULT_DISALLOWED_TOOLS="WebSearch WebFetch RemoteTrigger AskUserQuestion"
+case "$DATASET_NAME" in
+  deepsearchqa|kgmon/deepsearchqa|kgmon/deepsearchqa@*)
+    _HARBOR_DEFAULT_DISALLOWED_TOOLS="RemoteTrigger AskUserQuestion"
+    ;;
+esac
+HARBOR_DISALLOWED_TOOLS="${HARBOR_DISALLOWED_TOOLS-$_HARBOR_DEFAULT_DISALLOWED_TOOLS}"
+unset _HARBOR_DEFAULT_DISALLOWED_TOOLS
 HARBOR_APPEND_SYSTEM_PROMPT="${HARBOR_APPEND_SYSTEM_PROMPT:-Use English only for all reasoning, messages, filenames, and tool arguments. Use ASCII characters only unless reading existing non-ASCII file contents is strictly necessary.}"
 HARBOR_API_BASE="${HARBOR_API_BASE:-${HARBOR_ANTHROPIC_BASE_URL%/}/v1/chat/completions}"
 ROLLOUT="${ROLLOUT:-0}"
@@ -1065,6 +1074,7 @@ harbor_metric_mode() {
 
 harbor_registry_dataset_name() {
   case "$DATASET_NAME" in
+    deepsearchqa) printf '%s\n' "$HARBOR_DEEPSEARCHQA_REGISTRY_ID"; return 0 ;;
     seta) printf 'seta-env\n'; return 0 ;;
     terminalbench21) printf '%s\n' "$HARBOR_TERMINALBENCH21_REGISTRY_ID"; return 0 ;;
     sweverify) printf 'swebench-verified\n'; return 0 ;;
@@ -1086,6 +1096,20 @@ harbor_metadata_dataset_name() {
 
 harbor_uses_registry_dataset() {
   harbor_registry_dataset_name >/dev/null
+}
+
+harbor_validate_dataset_runtime_requirements() {
+  local registry_dataset
+  registry_dataset="$(harbor_registry_dataset_name 2>/dev/null || true)"
+  case "$registry_dataset" in
+    "$HARBOR_DEEPSEARCHQA_REGISTRY_ID"|"$HARBOR_DEEPSEARCHQA_REGISTRY_ID"@*)
+      if [[ -z "${GEMINI_API_KEY:-}" && -z "${GOOGLE_API_KEY:-}" ]]; then
+        echo "[ERROR] DeepSearchQA requires GEMINI_API_KEY or GOOGLE_API_KEY for its verifier." >&2
+        echo "[ERROR] Store the key in config.local.env or export it for this run." >&2
+        return 1
+      fi
+      ;;
+  esac
 }
 
 harbor_registry_task_name() {

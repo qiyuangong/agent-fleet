@@ -4,8 +4,8 @@ import sys
 import unittest
 from pathlib import Path
 from types import ModuleType
+from typing import Self
 from unittest.mock import patch
-
 
 VERIFIER_PATH = (
     Path(__file__).resolve().parents[1]
@@ -60,7 +60,7 @@ class FakeResponse:
     def __init__(self, payload: dict[str, object]) -> None:
         self.payload = payload
 
-    def __enter__(self) -> "FakeResponse":
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, *_args: object) -> None:
@@ -156,9 +156,11 @@ class DeepSearchQAJudgeTest(unittest.TestCase):
         )
 
     def test_requires_all_judge_settings(self) -> None:
-        with patch.dict("os.environ", {}, clear=True):
-            with self.assertRaisesRegex(RuntimeError, "JUDGE_BASE_URL"):
-                VERIFIER.call_judge("rate this")
+        with (
+            patch.dict("os.environ", {}, clear=True),
+            self.assertRaisesRegex(RuntimeError, "JUDGE_BASE_URL"),
+        ):
+            VERIFIER.call_judge("rate this")
 
     def test_rejects_malformed_chat_completion(self) -> None:
         response = FakeResponse({"choices": []})
@@ -173,9 +175,9 @@ class DeepSearchQAJudgeTest(unittest.TestCase):
                 clear=True,
             ),
             patch.object(VERIFIER.request, "urlopen", return_value=response),
+            self.assertRaisesRegex(RuntimeError, "malformed"),
         ):
-            with self.assertRaisesRegex(RuntimeError, "malformed"):
-                VERIFIER.call_judge("rate this")
+            VERIFIER.call_judge("rate this")
 
 
 if __name__ == "__main__":

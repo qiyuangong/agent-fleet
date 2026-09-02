@@ -6,7 +6,6 @@ from typing import Any
 
 from harbor.verifier.verifier import Verifier
 
-
 _JUDGE_ENV_NAMES = ("JUDGE_BASE_URL", "JUDGE_API_KEY", "JUDGE_MODEL")
 _OVERLAY_DIR = Path(__file__).with_name("deepsearchqa_verifier_files")
 

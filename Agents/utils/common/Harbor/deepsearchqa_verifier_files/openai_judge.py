@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Replace DeepSearchQA's judge call with an OpenAI-compatible endpoint."""
 
 from __future__ import annotations

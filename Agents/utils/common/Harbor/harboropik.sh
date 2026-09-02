@@ -885,6 +885,9 @@ run_oracle_task() {
   else
     cmd+=( --path "$DATASET_PATH" )
   fi
+  if harbor_uses_deepsearchqa_dataset; then
+    cmd+=( --verifier "deepsearchqa_verifier:DeepSearchQAVerifier" )
+  fi
   append_environment_backend_args
   if [[ "$HARBOR_ENVIRONMENT_TYPE" != "e2b" && "$HARBOR_ENVIRONMENT_TYPE" != "qz" ]] \
     && verifier_uv_bin_ready; then
@@ -1148,6 +1151,9 @@ run_harbor() {
     cmd+=( --dataset "$(harbor_registry_dataset_name)" )
   else
     cmd+=( --path "$DATASET_PATH" )
+  fi
+  if harbor_uses_deepsearchqa_dataset; then
+    cmd+=( --verifier "deepsearchqa_verifier:DeepSearchQAVerifier" )
   fi
   prepare_opensandbox_image_ref "$out_dir/opensandbox-bundle.json" || return 1
   append_environment_backend_args
@@ -1508,6 +1514,9 @@ run_opencode_task() {
       cmd+=( --dataset "$(harbor_registry_dataset_name)" )
     else
       cmd+=( --path "$DATASET_PATH" )
+    fi
+    if harbor_uses_deepsearchqa_dataset; then
+      cmd+=( --verifier "deepsearchqa_verifier:DeepSearchQAVerifier" )
     fi
     prepare_opensandbox_image_ref "$out_dir/opensandbox-bundle.json" || return 1
     append_environment_backend_args

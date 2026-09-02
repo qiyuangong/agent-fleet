@@ -1,19 +1,20 @@
 # DeepSearchQA
 
-Agent Fleet runs the published [Harbor Hub dataset](https://hub.harborframework.com/datasets/kgmon/deepsearchqa) without vendoring its 900 tasks. `DATASET_NAME=deepsearchqa` resolves to `kgmon/deepsearchqa`; a versioned registry ID such as `kgmon/deepsearchqa@<version>` also works directly.
+Agent Fleet runs the published [Harbor Hub dataset](https://hub.harborframework.com/datasets/kgmon/deepsearchqa) without vendoring its 900 tasks. `DATASET_NAME=deepsearchqa` resolves to `kgmon/deepsearchqa`; versioned forms such as `deepsearchqa@<version>` and `kgmon/deepsearchqa@<version>` also work.
 
 DeepSearchQA tasks require internet access. For Claude Code runs, the alias leaves `WebSearch` and `WebFetch` available while continuing to disable interactive and remote-trigger tools. An explicit `HARBOR_DISALLOWED_TOOLS` value always takes precedence.
 
-## Verifier credential
+## Judge endpoint
 
-The dataset verifier uses Gemini 2.5 Flash by default. Put one judge credential in the git-ignored `config.local.env`:
+Agent Fleet replaces the package's Gemini verifier at runtime with an OpenAI-compatible chat-completions verifier. Configure the existing judge endpoint values in the git-ignored `config.local.env`:
 
 ```bash
-GEMINI_API_KEY=replace-with-your-key
-# Alternatively: GOOGLE_API_KEY=replace-with-your-key
+JUDGE_BASE_URL=https://judge.example/v1/chat/completions
+JUDGE_API_KEY=replace-with-your-key
+JUDGE_MODEL=your-judge-model
 ```
 
-The key is consumed by the verifier contract, not passed to the evaluated agent. Live runs fail before setup if neither variable is available. To use a different judge, set `DEEPSEARCHQA_GRADER_MODEL`; results from a different judge may not be directly comparable with the published benchmark.
+These values are consumed only by the verifier and are not passed to the evaluated agent. Live runs fail before setup if any value is missing. Scores from a judge other than the package's original Gemini judge may not be directly comparable with the published benchmark.
 
 ## Run
 

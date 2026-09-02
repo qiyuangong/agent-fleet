@@ -32,7 +32,7 @@ don't duplicate them under `Agents/`.
 
 `deepsearchqa` is also a registry alias, resolving to `kgmon/deepsearchqa`.
 It has no local task list; see [DeepSearchQA/README.md](DeepSearchQA/README.md)
-for its web-tool and verifier-key requirements.
+for its web-tool and judge-endpoint requirements.
 
 ## PinchBench (`Pinchbench/`)
 

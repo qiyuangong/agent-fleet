@@ -48,7 +48,7 @@ restarting.
 
 `DATASET_NAME` selects a task list under `Tasks/` (for example
 `Tasks/SETA/harbor_tasks.txt`); `TASK_SOURCE_FILE=<path>` overrides it.
-DeepSearchQA runs from Harbor Hub and requires a Gemini judge key; see
+DeepSearchQA runs from Harbor Hub and requires an OpenAI-compatible judge endpoint; see
 [Tasks/DeepSearchQA/README.md](../Tasks/DeepSearchQA/README.md).
 
 ### Online Analysis (opt-in)

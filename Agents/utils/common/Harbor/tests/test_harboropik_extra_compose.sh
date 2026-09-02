@@ -281,7 +281,9 @@ run_harboropik() {
   local min_test="${9:-0}"
   local runs="${10:-1}"
   local n_concurrent="${11:-1}"
-  local gemini_api_key="${12:-}"
+  local judge_base_url="${12:-}"
+  local judge_api_key="${13:-}"
+  local judge_model="${14:-}"
   local opik_base="http://opik.example"
   local opik_url_override="http://opik.example/api"
   local hook_flag="1"
@@ -331,7 +333,9 @@ run_harboropik() {
     OPIK_API_KEY="fake-opik-key" \
     BASE_URL="http://llm.example" \
     API_KEY="fake-llm-key" \
-    GEMINI_API_KEY="$gemini_api_key" \
+    JUDGE_BASE_URL="$judge_base_url" \
+    JUDGE_API_KEY="$judge_api_key" \
+    JUDGE_MODEL="$judge_model" \
     MODEL="fake-model" \
     MIN_TEST="$min_test" \
     MIN_TEST_INCLUDE_TASK="fix-git" \
@@ -402,7 +406,7 @@ main() {
   local seta_capture sweverify_capture registry_capture traceoff_capture traceoff_oc_capture
   local opencode_registry_capture opencode_local_capture
   local min_test_capture
-  local deepsearchqa_capture
+  local deepsearchqa_capture deepsearchqa_opencode_capture deepsearchqa_oracle_capture
   tmp="$(mktemp -d)"
   TEST_TMP_DIR="$tmp"
   trap 'rm -rf "$TEST_TMP_DIR"' EXIT
@@ -440,12 +444,40 @@ main() {
   deepsearchqa_capture="$tmp/deepsearchqa.args"
   run_harboropik \
     "claude-code" "$capture_bin" "$deepsearchqa_capture" "$tmp/deepsearchqa" \
-    "deepsearchqa" "" "true" "1" "0" "1" "1" "fake-judge-key"
+    "deepsearchqa" "" "true" "1" "0" "1" "1" \
+    "https://judge.example/v1/chat/completions" "fake-judge-key" "judge-model"
   assert_arg_pair "$deepsearchqa_capture" "--dataset" "kgmon/deepsearchqa"
+  assert_arg_pair \
+    "$deepsearchqa_capture" \
+    "--verifier" \
+    "deepsearchqa_verifier:DeepSearchQAVerifier"
+  assert_arg_absent "$deepsearchqa_capture" "fake-judge-key"
   assert_arg_pair \
     "$deepsearchqa_capture" \
     "--ak" \
     "disallowed_tools=RemoteTrigger AskUserQuestion"
+
+  deepsearchqa_opencode_capture="$tmp/deepsearchqa-opencode.args"
+  run_harboropik \
+    "opencode" "$capture_bin" "$deepsearchqa_opencode_capture" \
+    "$tmp/deepsearchqa-opencode" "deepsearchqa" "" "true" "1" "0" "1" "1" \
+    "https://judge.example/v1/chat/completions" "fake-judge-key" "judge-model"
+  assert_arg_pair \
+    "$deepsearchqa_opencode_capture" \
+    "--verifier" \
+    "deepsearchqa_verifier:DeepSearchQAVerifier"
+  assert_arg_absent "$deepsearchqa_opencode_capture" "fake-judge-key"
+
+  deepsearchqa_oracle_capture="$tmp/deepsearchqa-oracle.args"
+  run_harboropik \
+    "oracle" "$capture_bin" "$deepsearchqa_oracle_capture" \
+    "$tmp/deepsearchqa-oracle" "deepsearchqa" "" "true" "1" "0" "1" "1" \
+    "https://judge.example/v1/chat/completions" "fake-judge-key" "judge-model"
+  assert_arg_pair \
+    "$deepsearchqa_oracle_capture" \
+    "--verifier" \
+    "deepsearchqa_verifier:DeepSearchQAVerifier"
+  assert_arg_absent "$deepsearchqa_oracle_capture" "fake-judge-key"
 
   opencode_capture="$tmp/opencode-default.args"
   run_harboropik \

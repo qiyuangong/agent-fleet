@@ -146,7 +146,9 @@ Typical dataset paths:
 | `MODEL` | Model name passed to Harbor |
 | `BASE_URL` | Model gateway base URL |
 | `API_KEY` | Model gateway API key |
-| `GEMINI_API_KEY` or `GOOGLE_API_KEY` | DeepSearchQA verifier credential; required for live DeepSearchQA runs |
+| `JUDGE_BASE_URL` | OpenAI-compatible judge URL for DeepSearchQA; `/v1` and `/v1/chat/completions` forms are accepted |
+| `JUDGE_API_KEY` | DeepSearchQA judge credential; passed only to the verifier |
+| `JUDGE_MODEL` | Model name used by the DeepSearchQA judge |
 | `HARBOR_TEMPERATURE` | OpenCode sampling temperature for fixed benchmark runs; unset by default |
 | `HARBOR_TOP_P` | OpenCode nucleus-sampling value for fixed benchmark runs; unset by default |
 | `HARBOR_MAX_TOKENS` | Maximum output tokens for OpenCode, Claude Code, or Pi fixed benchmark runs; defaults to existing agent limits when unset |

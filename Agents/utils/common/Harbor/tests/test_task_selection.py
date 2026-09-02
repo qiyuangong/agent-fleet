@@ -21,8 +21,9 @@ class HarborTaskSelectionTest(unittest.TestCase):
     ) -> subprocess.CompletedProcess[str]:
         env = os.environ.copy()
         env.pop("RESET_RUN", None)
-        env.pop("GEMINI_API_KEY", None)
-        env.pop("GOOGLE_API_KEY", None)
+        env.pop("JUDGE_BASE_URL", None)
+        env.pop("JUDGE_API_KEY", None)
+        env.pop("JUDGE_MODEL", None)
         env.pop("HARBOR_DISALLOWED_TOOLS", None)
         env.update(overrides)
         return subprocess.run(
@@ -112,6 +113,7 @@ class HarborTaskSelectionTest(unittest.TestCase):
     def test_deepsearchqa_alias_enables_native_web_tools(self) -> None:
         for dataset_name in (
             "deepsearchqa",
+            "deepsearchqa@latest",
             "kgmon/deepsearchqa",
             "kgmon/deepsearchqa@latest",
         ):
@@ -125,8 +127,8 @@ class HarborTaskSelectionTest(unittest.TestCase):
 
                 self.assertEqual(result.returncode, 0, result.stderr)
                 expected_dataset = (
-                    "kgmon/deepsearchqa"
-                    if dataset_name == "deepsearchqa"
+                    dataset_name.replace("deepsearchqa", "kgmon/deepsearchqa", 1)
+                    if dataset_name.startswith("deepsearchqa")
                     else dataset_name
                 )
                 self.assertIn(f"dataset={expected_dataset}", result.stdout)
@@ -145,30 +147,56 @@ class HarborTaskSelectionTest(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(result.stdout.strip(), f"[{explicit_value}]")
 
-    def test_deepsearchqa_requires_a_judge_key(self) -> None:
+    def test_empty_disallowed_tools_keeps_safe_default_for_other_datasets(self) -> None:
         result = self.run_env(
-            "harbor_validate_dataset_runtime_requirements",
-            DATASET_NAME="deepsearchqa",
-            GEMINI_API_KEY="",
-            GOOGLE_API_KEY="",
+            'printf "[%s]\\n" "$HARBOR_DISALLOWED_TOOLS"',
+            DATASET_NAME="terminalbench21",
+            HARBOR_DISALLOWED_TOOLS="",
             OPIK_URL="",
         )
 
-        self.assertEqual(result.returncode, 1)
-        self.assertIn("GEMINI_API_KEY or GOOGLE_API_KEY", result.stderr)
-        self.assertIn("config.local.env", result.stderr)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            result.stdout.strip(),
+            "[WebSearch WebFetch RemoteTrigger AskUserQuestion]",
+        )
 
-    def test_deepsearchqa_accepts_either_judge_key(self) -> None:
-        for key_name in ("GEMINI_API_KEY", "GOOGLE_API_KEY"):
-            with self.subTest(key_name=key_name):
-                result = self.run_env(
-                    "harbor_validate_dataset_runtime_requirements",
-                    DATASET_NAME="deepsearchqa",
-                    OPIK_URL="",
-                    **{key_name: "test-key"},
-                )
+    def test_deepsearchqa_requires_every_judge_setting(self) -> None:
+        valid_settings = {
+            "JUDGE_BASE_URL": "https://judge.example/v1/chat/completions",
+            "JUDGE_API_KEY": "test-key",
+            "JUDGE_MODEL": "test-model",
+        }
+        for missing_name in valid_settings:
+            for invalid_value in ("", " \t "):
+                with self.subTest(
+                    missing_name=missing_name,
+                    invalid_value=invalid_value,
+                ):
+                    settings = valid_settings.copy()
+                    settings[missing_name] = invalid_value
+                    result = self.run_env(
+                        "harbor_validate_dataset_runtime_requirements",
+                        DATASET_NAME="deepsearchqa",
+                        OPIK_URL="",
+                        **settings,
+                    )
 
-                self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(result.returncode, 1)
+                    self.assertIn(missing_name, result.stderr)
+                    self.assertIn("config.local.env", result.stderr)
+
+    def test_deepsearchqa_accepts_complete_judge_settings(self) -> None:
+        result = self.run_env(
+            "harbor_validate_dataset_runtime_requirements",
+            DATASET_NAME="deepsearchqa",
+            JUDGE_BASE_URL="https://judge.example/v1/chat/completions",
+            JUDGE_API_KEY="test-key",
+            JUDGE_MODEL="test-model",
+            OPIK_URL="",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_deepsearchqa_live_runner_fails_before_creating_run_state(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -177,8 +205,9 @@ class HarborTaskSelectionTest(unittest.TestCase):
             env.update(
                 {
                     "DATASET_NAME": "deepsearchqa",
-                    "GEMINI_API_KEY": "",
-                    "GOOGLE_API_KEY": "",
+                    "JUDGE_BASE_URL": "",
+                    "JUDGE_API_KEY": "",
+                    "JUDGE_MODEL": "",
                     "HARBOR_DRY_RUN": "0",
                     "HARBOR_QUEUE_WORKER": "1",
                     "OPIK_URL": "",
@@ -198,7 +227,7 @@ class HarborTaskSelectionTest(unittest.TestCase):
             )
 
             self.assertEqual(result.returncode, 1)
-            self.assertIn("GEMINI_API_KEY or GOOGLE_API_KEY", result.stderr)
+            self.assertIn("JUDGE_BASE_URL", result.stderr)
             self.assertFalse(output.exists())
 
     def test_other_registry_datasets_do_not_require_a_judge_key(self) -> None:

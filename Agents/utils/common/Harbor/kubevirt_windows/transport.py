@@ -42,6 +42,8 @@ def sftp_quote(value):
 class WindowsSSH:
     def __init__(self, settings, name, ip, local_dir):
         self.settings, self.name, self.ip = settings, name, ip
+        if not ip:
+            raise ValueError("ip is required")
         self.local_dir = Path(local_dir)
         self.remote_root = f"C:/ProgramData/AgentFleet/{name}"
 
@@ -68,6 +70,10 @@ class WindowsSSH:
             "-o",
             f"UserKnownHostsFile={self.local_dir / 'known_hosts'}",
             "-o",
+            # Direct-IP connect: HostName overrides the destination host, so
+            # the `self.name` argument in powershell()/sftp() resolves to the
+            # VM ipAddress. A fresh known_hosts per trial pins the host key
+            # for this VM only.
             f"HostName={self.ip}",
             "-o",
             f"User={self.settings.ssh_user}",

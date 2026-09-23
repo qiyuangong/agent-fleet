@@ -10,7 +10,6 @@ import unittest
 from pathlib import Path
 
 import httpx
-
 from kubevirt_windows.control import (
     DEFAULT_CPU_CORES,
     DEFAULT_CPU_SOCKETS,
@@ -82,9 +81,11 @@ class SettingsTests(unittest.TestCase):
                 make_settings({"HARBOR_KUBEVIRT_NAMESPACE": "Bad_NS"}, key)
 
     def test_rejects_missing_ssh_key(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            with self.assertRaises(FileNotFoundError):
-                make_settings({}, Path(tmp) / "missing-key")
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            self.assertRaises(FileNotFoundError),
+        ):
+            make_settings({}, Path(tmp) / "missing-key")
 
 
 @contextlib.contextmanager

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import copy
 import json
 import os
 import subprocess
@@ -21,182 +20,23 @@ from harbor.models.task.config import EnvironmentConfig
 from harbor.models.trial.paths import TrialPaths
 from kubevirt_windows.agent import WindowsCommandAgent
 from kubevirt_windows.control import (
-    OWNER_LABEL,
+    Platform,
     Settings,
-    VMControl,
-    build_manifest,
-    run_process,
 )
 from kubevirt_windows.environment import KubeVirtWindowsEnvironment
 from kubevirt_windows.transport import WindowsSSH, ps_quote, sftp_quote, windows_path
 
 
-def vm_template():
-    return {
-        "apiVersion": "kubevirt.io/v1",
-        "kind": "VirtualMachine",
-        "metadata": {"name": "golden", "uid": "old", "resourceVersion": "42"},
-        "status": {"ready": True},
-        "spec": {
-            "running": False,
-            "dataVolumeTemplates": [
-                {
-                    "metadata": {"name": "disk"},
-                    "spec": {
-                        "source": {
-                            "pvc": {"namespace": "images", "name": "windows-golden"}
-                        },
-                        "storage": {"resources": {"requests": {"storage": "64Gi"}}},
-                    },
-                }
-            ],
-            "template": {
-                "metadata": {"annotations": {"example.com/network": "test"}},
-                "spec": {
-                    "domain": {
-                        "cpu": {"cores": 2, "model": "host-model"},
-                        "memory": {"guest": "4Gi"},
-                    },
-                    "volumes": [{"name": "root", "dataVolume": {"name": "disk"}}],
-                },
-            },
-        },
-    }
-
-
-class ManifestTests(unittest.TestCase):
-    def test_clone_isolation_and_source_is_unchanged(self):
-        template = vm_template()
-        before = copy.deepcopy(template)
-        first = build_manifest(template, "trial-a", "benchmarks", "a")
-        second = build_manifest(template, "trial-b", "benchmarks", "b")
-        self.assertEqual(template, before)
-        self.assertNotEqual(
-            first["spec"]["dataVolumeTemplates"][0]["metadata"]["name"],
-            second["spec"]["dataVolumeTemplates"][0]["metadata"]["name"],
-        )
-        self.assertEqual(
-            first["spec"]["template"]["spec"]["volumes"][0]["dataVolume"]["name"],
-            "trial-a-disk-0",
-        )
-        self.assertEqual(
-            first["spec"]["dataVolumeTemplates"][0]["spec"]["source"],
-            before["spec"]["dataVolumeTemplates"][0]["spec"]["source"],
-        )
-        self.assertNotIn("uid", first["metadata"])
-        self.assertNotIn("status", first)
-        self.assertNotIn("running", first["spec"])
-        self.assertEqual(first["spec"]["runStrategy"], "Always")
-        self.assertEqual(first["metadata"]["labels"][OWNER_LABEL], "a")
-        self.assertEqual(
-            first["spec"]["template"]["metadata"]["annotations"],
-            {"example.com/network": "test"},
-        )
-
-    def test_reject_shared_disks_and_external_datavolumes(self):
-        for volume in [
-            {"persistentVolumeClaim": {"claimName": "golden"}},
-            {"dataVolume": {"name": "other-trial-disk"}},
-            {"hostDisk": {"path": "/host/disk", "type": "Disk"}},
-        ]:
-            with self.subTest(volume=volume):
-                template = vm_template()
-                template["spec"]["template"]["spec"]["volumes"] = [
-                    {"name": "root", **volume}
-                ]
-                with self.assertRaises(ValueError):
-                    build_manifest(template, "trial", "benchmarks", "token")
-
-    def test_resources_preserve_cpu_model_and_disk_size(self):
-        result = build_manifest(
-            vm_template(), "trial", "benchmarks", "token", cpus=4, memory_mb=8192
-        )
-        domain = result["spec"]["template"]["spec"]["domain"]
-        self.assertEqual(
-            domain["cpu"],
-            {"cores": 4, "sockets": 1, "threads": 1, "model": "host-model"},
-        )
-        self.assertEqual(domain["memory"]["guest"], "8192Mi")
-        self.assertEqual(domain["resources"]["limits"]["cpu"], "4")
-
-    def test_exported_vm_identities_are_not_reused(self):
-        template = vm_template()
-        domain = template["spec"]["template"]["spec"]["domain"]
-        domain["firmware"] = {"uuid": "golden-uuid"}
-        domain["devices"] = {
-            "interfaces": [
-                {"name": "default", "macAddress": "02:00:00:00:00:01", "masquerade": {}}
-            ]
-        }
-        vm = build_manifest(template, "trial", "benchmarks", "token")
-        result = vm["spec"]["template"]["spec"]["domain"]
-        self.assertNotIn("uuid", result["firmware"])
-        self.assertNotIn("macAddress", result["devices"]["interfaces"][0])
-        self.assertIn("masquerade", result["devices"]["interfaces"][0])
-
-
-class ControlTests(unittest.IsolatedAsyncioTestCase):
-    def setUp(self):
-        self.settings = Settings(Path("template"), "benchmarks", "runner", Path("key"))
-        self.control = VMControl(self.settings, "trial", "token")
-
-    async def test_ambiguous_create_remains_cleanup_eligible(self):
-        self.control.kubectl = AsyncMock(side_effect=TimeoutError)
-        with self.assertRaises(TimeoutError):
-            await self.control.create(vm_template())
-        self.assertTrue(self.control.attempted)
-
-    async def test_cleanup_refuses_another_trial(self):
-        self.control.attempted = True
-        self.control.kubectl = AsyncMock(return_value=b'{"metadata":{"labels":{}}}')
-        with self.assertRaisesRegex(RuntimeError, "another trial"):
-            await self.control.stop(True)
-        self.assertEqual(self.control.kubectl.await_count, 1)
-
-    async def test_cleanup_cascades_and_is_idempotent(self):
-        self.control.attempted = True
-        self.control.kubectl = AsyncMock(
-            side_effect=[
-                json.dumps({"metadata": {"labels": {OWNER_LABEL: "token"}}}).encode(),
-                b"deleted",
-            ]
-        )
-        await self.control.stop(True)
-        await self.control.stop(True)
-        self.assertEqual(self.control.kubectl.await_count, 2)
-        self.assertIn("--cascade=foreground", self.control.kubectl.call_args.args)
-
-    async def test_retain_halts_and_waits_for_vmi(self):
-        self.control.attempted = True
-        self.control.owned_vm = AsyncMock(return_value={"metadata": {}})
-        self.control.kubectl = AsyncMock()
-        await self.control.stop(False)
-        self.assertEqual(self.control.kubectl.call_args_list[0].args[0], "patch")
-        self.assertEqual(
-            self.control.kubectl.call_args_list[1].args[:2], ("wait", "--for=delete")
-        )
-
-    async def test_local_timeout_terminates_process(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            pid_path = Path(tmp) / "pid"
-            code = "import os,sys,time; open(sys.argv[1],'w').write(str(os.getpid())); time.sleep(30)"
-            with self.assertRaises(TimeoutError):
-                await run_process([sys.executable, "-c", code, pid_path], timeout=0.5)
-            pid = int(pid_path.read_text())
-            with self.assertRaises(ProcessLookupError):
-                os.kill(pid, 0)
-
-    async def test_subprocess_output_is_bounded(self):
-        with self.assertRaisesRegex(RuntimeError, "output limit"):
-            await run_process(
-                [
-                    sys.executable,
-                    "-c",
-                    "import sys,time; sys.stdout.write('x'*8192); sys.stdout.flush(); time.sleep(30)",
-                ],
-                max_output_bytes=1024,
-                timeout=5,
-            )
+def make_settings(key: Path) -> Settings:
+    return Settings(
+        platform=Platform(base_url="http://10.9.202.91:31600", token="tok"),
+        image="ubuntu20.04-template-image",
+        namespace="default",
+        ssh_user="runner",
+        ssh_key=key,
+        subnet="ovn-default",
+        storage_class="ceph-rbd-sc",
+    )
 
 
 class PathTests(unittest.TestCase):
@@ -222,14 +62,15 @@ class PathTests(unittest.TestCase):
 
 class TransportTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
-        self.settings = Settings(
-            Path("template"),
-            "benchmarks",
-            "runner",
-            Path("key"),
-            context="example context",
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        root = Path(self._tmp.name)
+        key = root / "id_rsa"
+        key.write_text("fake-key")
+        self.settings = make_settings(key)
+        self.transport = WindowsSSH(
+            self.settings, "trial", "10.9.202.100", root / "known-hosts"
         )
-        self.transport = WindowsSSH(self.settings, "trial", "/tmp/test-known-hosts")
 
     async def test_request_uses_file_not_command_interpolation(self):
         captured = {}
@@ -285,25 +126,15 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
             self.transport.powershell = AsyncMock(return_value=json.dumps(paths))
             self.assertEqual(await self.transport.list_files("C:/logs"), paths)
 
-    def test_proxy_uses_context_and_pins_guest_host_key(self):
-        options = self.transport.options()
-        self.assertIn("StrictHostKeyChecking=accept-new", options)
-        proxy = next(item for item in options if item.startswith("ProxyCommand="))
-        self.assertIn("'example context'", proxy)
-        self.assertIn("--namespace benchmarks", proxy)
-        self.assertIn("vmi/trial", proxy)
-
 
 class EnvironmentTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
-        self.template = self.root / "vm.json"
-        self.template.write_text(json.dumps(vm_template()))
         key = self.root / "key"
         key.write_text("fake-key")
-        self.settings = Settings(self.template, "benchmarks", "runner", key)
+        self.settings = make_settings(key)
         patcher = patch.object(Settings, "from_env", return_value=self.settings)
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -365,40 +196,64 @@ class EnvironmentTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_start_waits_for_guest_and_creates_log_dirs(self):
         environment = self.environment()
+        environment.control.available_ips = AsyncMock(return_value=["10.9.202.100"])
         environment.control.create = AsyncMock()
-        environment.control.owned_vm = AsyncMock(
-            return_value={"status": {"ready": True}}
+        environment.control.get = AsyncMock(
+            return_value={
+                "name": environment.vm_name,
+                "namespace": "default",
+                "ip": "10.9.202.100",
+                "ready": True,
+                "labels": {},
+                "status": "Running",
+                "uid": "x",
+            }
         )
         with patch("kubevirt_windows.environment.WindowsSSH") as transport_class:
             transport_class.return_value = AsyncMock()
             await environment.start()
         self.assertTrue(environment._started)
+        environment.control.create.assert_awaited_once()
         environment.transport.probe.assert_awaited_once()
         self.assertEqual(environment.transport.mkdir.await_count, 4)
         metadata = json.loads((self.root / "trial/kubevirt.json").read_text())
         self.assertEqual(metadata["vm"], environment.vm_name)
+        self.assertEqual(metadata["ip"], "10.9.202.100")
         self.assertNotIn("fake-key", json.dumps(metadata))
         environment.control.stop = AsyncMock()
+        environment.control.delete = AsyncMock()
         await environment.stop()
+        environment.control.stop.assert_awaited_once_with(environment.vm_name)
+        environment.control.delete.assert_awaited_once_with(environment.vm_name)
 
     async def test_failed_start_cleans_up(self):
         environment = self.environment()
+        environment.control.available_ips = AsyncMock(return_value=["10.9.202.100"])
         environment.control.create = AsyncMock(
             side_effect=RuntimeError("creation failed")
         )
         environment.control.stop = AsyncMock()
+        environment.control.delete = AsyncMock()
+        environment.control.close = AsyncMock()
         with self.assertRaisesRegex(RuntimeError, "creation failed"):
             await environment.start()
-        environment.control.stop.assert_awaited_once_with(True)
+        environment.control.stop.assert_awaited_once_with(environment.vm_name)
+        environment.control.delete.assert_awaited_once_with(environment.vm_name)
+        environment.control.close.assert_awaited_once()
         self.assertIsNone(environment._local_dir)
 
     async def test_cancelled_start_cleans_up(self):
         environment = self.environment()
+        environment.control.available_ips = AsyncMock(return_value=["10.9.202.100"])
         environment.control.create = AsyncMock(side_effect=asyncio.CancelledError)
         environment.control.stop = AsyncMock()
+        environment.control.delete = AsyncMock()
+        environment.control.close = AsyncMock()
         with self.assertRaises(asyncio.CancelledError):
             await environment.start()
-        environment.control.stop.assert_awaited_once_with(True)
+        environment.control.stop.assert_awaited_once_with(environment.vm_name)
+        environment.control.delete.assert_awaited_once_with(environment.vm_name)
+        environment.control.close.assert_awaited_once()
 
     async def test_filtered_download_and_protected_reward(self):
         environment = self.environment()

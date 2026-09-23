@@ -17,7 +17,14 @@ from harbor.environments.capabilities import (
 from harbor.models.task.config import TaskOS
 from harbor.utils.path_filter import filter_paths_by_patterns
 
-from .control import Settings, VMControl, build_manifest, load_template
+from .control import (
+    OWNER_LABEL,
+    PlatformAPIError,
+    PlatformControl,
+    Settings,
+    _api_base,
+    raise_for_platform,
+)
 from .transport import WindowsSSH, windows_path
 
 
@@ -26,7 +33,8 @@ class KubeVirtWindowsEnvironment(BaseEnvironment):
         self.settings = Settings.from_env()
         self.token = uuid.uuid4().hex
         self.vm_name = "hf-win-" + self.token[:24]
-        self.control = VMControl(self.settings, self.vm_name, self.token)
+        self.control = PlatformControl(self.settings)
+        self._created = False
         self._local_dir = None
         self.transport = None
         self._started = False
@@ -47,15 +55,29 @@ class KubeVirtWindowsEnvironment(BaseEnvironment):
     @classmethod
     def preflight(cls):
         settings = Settings.from_env()
-        build_manifest(
-            load_template(settings.template),
-            "preflight",
-            settings.namespace,
-            "preflight",
-        )
-        for executable in ("kubectl", "virtctl", "ssh", "sftp"):
+        for executable in ("ssh", "sftp"):
             if not shutil.which(executable):
                 raise ValueError(f"{executable} is required on the Linux runner")
+        # Read-only reachability + token check; never mutates the platform.
+        try:
+            import httpx
+
+            with httpx.Client(
+                base_url=_api_base(settings.platform.base_url),
+                headers={"Authorization": f"Bearer {settings.platform.token}"},
+                timeout=httpx.Timeout(15.0),
+            ) as client:
+                raise_for_platform(client.get("/users/me"))
+        except ValueError:
+            raise
+        except httpx.HTTPError as exc:
+            raise ValueError(
+                f"KubeVirt platform unreachable at {settings.platform.base_url}: {exc}"
+            ) from exc
+        except PlatformAPIError as exc:
+            raise ValueError(
+                f"KubeVirt platform rejected the token: {exc}"
+            ) from exc
 
     def _validate_definition(self):
         if self.os != TaskOS.WINDOWS:
@@ -66,7 +88,7 @@ class KubeVirtWindowsEnvironment(BaseEnvironment):
             raise ValueError("KubeVirt Windows does not enforce task network policies")
         if self.task_env_config.docker_image:
             raise ValueError(
-                "Select the Windows image in HARBOR_KUBEVIRT_TEMPLATE, not docker_image"
+                "Select the Windows image in HARBOR_KUBEVIRT_IMAGE, not docker_image"
             )
         if self.task_env_config.storage_mb is not None:
             raise ValueError(
@@ -93,32 +115,29 @@ class KubeVirtWindowsEnvironment(BaseEnvironment):
                 raise ValueError("Host bind mounts are unsupported by KubeVirt Windows")
         if self.task_env_config.workdir:
             windows_path(self.task_env_config.workdir)
-        self.manifest = build_manifest(
-            load_template(self.settings.template),
-            self.vm_name,
-            self.settings.namespace,
-            self.token,
-            cpus=self._effective_cpus,
-            memory_mb=self._effective_memory_mb,
-        )
 
     async def start(self, force_build=False):
         if self._started:
             return
-        if self.control.attempted:
+        if self._created:
             raise RuntimeError(
                 "A retained VM cannot be reused; create a new environment instance"
             )
         self._local_dir = tempfile.TemporaryDirectory(prefix="harbor-kubevirt-")
-        self.transport = WindowsSSH(self.settings, self.vm_name, self._local_dir.name)
+        tag = self.token[:12]
+        ips = await self.control.available_ips()
+        ip = ips[0] if ips else None
+        if not ip:
+            raise RuntimeError("No free IP available on subnet " + self.settings.subnet)
         self.trial_paths.trial_dir.mkdir(parents=True, exist_ok=True)
         (self.trial_paths.trial_dir / "kubevirt.json").write_text(
             json.dumps(
                 {
                     "vm": self.vm_name,
                     "namespace": self.settings.namespace,
-                    "context": self.settings.context,
-                    "ownership_label": self.token,
+                    "subnet": self.settings.subnet,
+                    "ip": ip,
+                    "labels": {"key": OWNER_LABEL, "value": tag},
                 },
                 indent=2,
             )
@@ -127,16 +146,28 @@ class KubeVirtWindowsEnvironment(BaseEnvironment):
         )
         try:
             async with asyncio.timeout(self.settings.start_timeout):
-                await self.control.create(self.manifest)
+                await self.control.create(
+                    self.vm_name,
+                    ip,
+                    labels=[{"key": OWNER_LABEL, "value": tag}],
+                )
+                self._created = True
                 while True:
-                    vm = await self.control.owned_vm()
-                    if vm and vm.get("status", {}).get("ready"):
-                        try:
-                            await self.transport.probe()
-                            break
-                        except (RuntimeError, TimeoutError):
-                            pass  # VMI readiness precedes Windows/OpenSSH readiness.
+                    vm = await self.control.get(self.vm_name)
+                    if vm.get("ready") and vm.get("ip"):
+                        ip = vm["ip"]
+                        break
                     await asyncio.sleep(2)
+                self.transport = WindowsSSH(
+                    self.settings, self.vm_name, ip, self._local_dir.name
+                )
+                while True:
+                    try:
+                        await self.transport.probe()
+                        break
+                    except (RuntimeError, TimeoutError):
+                        # VM readiness precedes Windows/OpenSSH readiness.
+                        await asyncio.sleep(2)
                 await self.transport.prepare()
                 for path in (
                     "C:/logs/agent",
@@ -157,9 +188,14 @@ class KubeVirtWindowsEnvironment(BaseEnvironment):
 
     async def stop(self, delete=True):
         try:
-            await self.control.stop(delete)
+            try:
+                await self.control.stop(self.vm_name)
+            finally:
+                if delete:
+                    await self.control.delete(self.vm_name)
         finally:
             self._started = False
+            self._created = False
             if self._local_dir is not None:
                 self._local_dir.cleanup()
                 self._local_dir = None

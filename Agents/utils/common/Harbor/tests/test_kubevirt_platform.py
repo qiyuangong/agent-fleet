@@ -254,6 +254,36 @@ class PlatformControlTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(await control.ping())
             self.assertEqual(captured, ["/api/v1/users/me"])
 
+    async def test_available_ips(self):
+        captured = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured.append(request.url.path)
+            return httpx.Response(
+                200,
+                json={
+                    "code": 200,
+                    "message": "ok",
+                    "data": {"ips": ["10.16.0.4", "10.16.0.5"]},
+                },
+            )
+
+        control = self._control(handler)
+        async with control:
+            self.assertEqual(await control.available_ips(), ["10.16.0.4", "10.16.0.5"])
+        self.assertEqual(captured, ["/api/v1/network/subnets/ovn-default/available-ips"])
+
+    async def test_available_ips_unexpected_shape(self):
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200, json={"code": 200, "message": "ok", "data": {"foo": "bar"}}
+            )
+
+        control = self._control(handler)
+        async with control:
+            with self.assertRaises(PlatformAPIError):
+                await control.available_ips()
+
     async def test_ping_rejects_bad_token(self):
         def handler(request: httpx.Request) -> httpx.Response:
             return httpx.Response(401, json={"code": 401, "message": "unauthorized"})

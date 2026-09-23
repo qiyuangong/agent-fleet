@@ -1,10 +1,8 @@
-"""KubeVirt lifecycle via kubectl; no credentials are copied into the guest."""
+"""Platform-HTTP VM lifecycle; no credentials are copied into the guest."""
 
 from __future__ import annotations
 
 import asyncio
-import copy
-import json
 import os
 import re
 import signal
@@ -13,7 +11,6 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-import yaml
 
 OWNER_LABEL = "agent-fleet/trial"
 
@@ -171,175 +168,6 @@ class Settings:
         )
 
 
-def build_manifest(template, name, namespace, token, *, cpus=None, memory_mb=None):
-    """Allocate new names for all disks; never attach an existing writable PVC."""
-    vm = copy.deepcopy(template)
-    if (
-        not isinstance(vm, dict)
-        or vm.get("apiVersion") != "kubevirt.io/v1"
-        or vm.get("kind") != "VirtualMachine"
-    ):
-        raise ValueError("Template must be one kubevirt.io/v1 VirtualMachine")
-    vm.pop("status", None)
-    original_metadata = vm.get("metadata", {})
-    vm["metadata"] = {
-        "name": name,
-        "namespace": namespace,
-        "labels": {**original_metadata.get("labels", {}), OWNER_LABEL: token},
-    }
-    annotations = original_metadata.get("annotations", {}).copy()
-    annotations.pop("kubectl.kubernetes.io/last-applied-configuration", None)
-    vm["metadata"]["annotations"] = annotations
-    spec = vm["spec"]
-    spec.pop("running", None)
-    spec["runStrategy"] = "Always"
-    # Shared firmware state can defeat trial isolation.
-    guest = spec["template"]["spec"]
-    if (
-        guest.get("domain", {})
-        .get("firmware", {})
-        .get("bootloader", {})
-        .get("efi", {})
-        .get("persistent")
-    ):
-        raise ValueError("Persistent EFI state is unsupported")
-    if guest.get("domain", {}).get("devices", {}).get("tpm", {}).get("persistent"):
-        raise ValueError("Persistent TPM state is unsupported")
-    template_metadata = spec["template"].get("metadata", {})
-    spec["template"]["metadata"] = {
-        "labels": {**template_metadata.get("labels", {}), OWNER_LABEL: token},
-        "annotations": template_metadata.get("annotations", {}),
-    }
-    names = {}
-    for index, disk in enumerate(spec.get("dataVolumeTemplates", [])):
-        old = disk["metadata"]["name"]
-        if old in names:
-            raise ValueError("Duplicate DataVolume template name")
-        names[old] = f"{name}-disk-{index}"
-        disk["metadata"] = {
-            "name": names[old],
-            "labels": {**disk["metadata"].get("labels", {}), OWNER_LABEL: token},
-            "annotations": disk["metadata"].get("annotations", {}),
-        }
-        disk.pop("status", None)
-        if not (
-            disk.get("spec", {}).get("source") or disk.get("spec", {}).get("sourceRef")
-        ):
-            raise ValueError("Each DataVolume needs a source or sourceRef")
-    boot_disk = False
-    for volume in guest.get("volumes", []):
-        if "dataVolume" in volume:
-            old = volume["dataVolume"]["name"]
-            if old not in names:
-                raise ValueError(
-                    "Every DataVolume must have a per-trial dataVolumeTemplate"
-                )
-            volume["dataVolume"]["name"] = names[old]
-            boot_disk = True
-        elif "containerDisk" in volume:
-            boot_disk = True
-        elif not any(
-            key in volume
-            for key in (
-                "cloudInitNoCloud",
-                "cloudInitConfigDrive",
-                "sysprep",
-                "secret",
-                "configMap",
-                "emptyDisk",
-            )
-        ):
-            raise ValueError(
-                "Unsupported volume: use dataVolumeTemplates for isolated disks"
-            )
-    if not boot_disk:
-        raise ValueError("Template requires a DataVolume or containerDisk")
-    domain = guest.setdefault("domain", {})
-    # Let KubeVirt allocate instance identities rather than copying exported
-    # golden-VM UUIDs or MAC addresses into every concurrently running clone.
-    domain.get("firmware", {}).pop("uuid", None)
-    for interface in domain.get("devices", {}).get("interfaces", []):
-        interface.pop("macAddress", None)
-    if cpus is not None:
-        domain.setdefault("cpu", {}).update(cores=cpus, sockets=1, threads=1)
-        domain["cpu"].pop("maxSockets", None)
-        resources = domain.setdefault("resources", {})
-        for key in ("requests", "limits"):
-            resources.setdefault(key, {})["cpu"] = str(cpus)
-    if memory_mb is not None:
-        domain.setdefault("memory", {})["guest"] = f"{memory_mb}Mi"
-        domain["memory"].pop("maxGuest", None)
-        # Preserve KubeVirt's automatic virtualization overhead calculation.
-        resources = domain.setdefault("resources", {})
-        for key in ("requests", "limits"):
-            resources.get(key, {}).pop("memory", None)
-    return vm
-
-
-class VMControl:
-    def __init__(self, settings, name, token):
-        self.settings, self.name, self.token = settings, name, token
-        self.attempted = False
-
-    async def kubectl(self, *args, data=None, timeout=60):
-        return await run_process(
-            ["kubectl", *self.settings.kube_args(), "--request-timeout=30s", *args],
-            data=data,
-            timeout=timeout,
-        )
-
-    async def create(self, manifest):
-        self.attempted = True  # Also clean up an ambiguous create response.
-        await self.kubectl("create", "-f", "-", data=json.dumps(manifest).encode())
-
-    async def owned_vm(self):
-        raw = await self.kubectl(
-            "get", "virtualmachine", self.name, "--ignore-not-found", "-o", "json"
-        )
-        if not raw.strip():
-            return None
-        vm = json.loads(raw)
-        if vm["metadata"].get("labels", {}).get(OWNER_LABEL) != self.token:
-            raise RuntimeError("Refusing to mutate a VM owned by another trial")
-        return vm
-
-    async def stop(self, delete):
-        if not self.attempted or await self.owned_vm() is None:
-            return
-        if delete:
-            await self.kubectl(
-                "delete",
-                "virtualmachine",
-                self.name,
-                "--cascade=foreground",
-                "--wait=true",
-                "--timeout=120s",
-                timeout=150,
-            )
-            self.attempted = False
-        else:
-            await self.kubectl(
-                "patch",
-                "virtualmachine",
-                self.name,
-                "--type=merge",
-                "-p",
-                '{"spec":{"runStrategy":"Halted"}}',
-            )
-            # Halted is a requested state; wait for the VMI to disappear.
-            await self.kubectl(
-                "wait",
-                "--for=delete",
-                f"virtualmachineinstance/{self.name}",
-                "--timeout=120s",
-                timeout=150,
-            )
-
-
-def load_template(path):
-    return yaml.safe_load(path.read_text(encoding="utf-8"))
-
-
 def _api_base(base_url: str) -> str:
     """Normalize a human-supplied base URL into the API v1 endpoint."""
     return base_url.rstrip("/") + "/api/v1"
@@ -467,6 +295,26 @@ class PlatformControl:
         raise_for_platform(response)
         body = response.json()
         return parse_vm(body.get("data", {}) if isinstance(body, dict) else {})
+
+    async def available_ips(self, subnet: str | None = None) -> list:
+        """Return free subnet IPs the platform may assign to a new VM.
+
+        The platform requires a concrete network.ipAddress at create time and
+        direct-IP SSH needs a known host, so a free IP is picked before create.
+        GET /network/ips is admin-only (403); the per-subnet available-ips
+        listing is the read-only call that works for this role.
+        """
+        subnet = subnet or self.settings.subnet
+        response = await self._client.get(
+            f"/network/subnets/{subnet}/available-ips"
+        )
+        raise_for_platform(response)
+        body = response.json()
+        data = body.get("data", {}) if isinstance(body, dict) else {}
+        ips = data.get("ips") if isinstance(data, dict) else data
+        if not isinstance(ips, list):
+            raise PlatformAPIError("available-ips returned unexpected shape")
+        return [ip for ip in ips if isinstance(ip, str) and ip]
 
     async def stop(self, name: str) -> dict:
         response = await self._client.put(

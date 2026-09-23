@@ -222,6 +222,7 @@ class EnvironmentTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("fake-key", json.dumps(metadata))
         environment.control.stop = AsyncMock()
         environment.control.delete = AsyncMock()
+        environment.control.close = AsyncMock()
         await environment.stop()
         environment.control.stop.assert_awaited_once_with(environment.vm_name)
         environment.control.delete.assert_awaited_once_with(environment.vm_name)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 import tempfile
 import unittest
@@ -22,20 +23,23 @@ VALID_ENV = {
 }
 
 
-def make_settings(overrides: dict, ssh_key: Path) -> Settings:
-    env = {**VALID_ENV, "HARBOR_KUBEVIRT_SSH_KEY": str(ssh_key), **overrides}
-    prev = {}
-    for key in env:
-        prev[key] = os.environ.get(key)
-        os.environ[key] = env[key]
+@contextlib.contextmanager
+def _pristine_harbor_env():
+    saved = {}
+    for key in list(os.environ):
+        if key.startswith("HARBOR_KUBEVIRT_"):
+            saved[key] = os.environ.pop(key)
     try:
-        return Settings.from_env()
+        yield
     finally:
-        for key, value in prev.items():
-            if value is None:
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = value
+        os.environ.update(saved)
+
+
+def make_settings(overrides: dict, ssh_key: Path) -> Settings:
+    with _pristine_harbor_env():
+        env = {**VALID_ENV, "HARBOR_KUBEVIRT_SSH_KEY": str(ssh_key), **overrides}
+        os.environ.update(env)
+        return Settings.from_env()
 
 
 class SettingsTests(unittest.TestCase):

@@ -123,10 +123,20 @@ class Settings:
         image = required("IMAGE")
         subnet = os.environ.get("HARBOR_KUBEVIRT_SUBNET", "ovn-default")
         storage_class = os.environ.get("HARBOR_KUBEVIRT_STORAGE_CLASS", "ceph-rbd-sc")
-        ssh_port = int(os.environ.get("HARBOR_KUBEVIRT_SSH_PORT", "22"))
-        start_timeout = int(os.environ.get("HARBOR_KUBEVIRT_START_TIMEOUT", "600"))
-        command_timeout = int(os.environ.get("HARBOR_KUBEVIRT_COMMAND_TIMEOUT", "3600"))
-        transfer_timeout = int(os.environ.get("HARBOR_KUBEVIRT_TRANSFER_TIMEOUT", "300"))
+
+        def as_int(key, default):
+            value = os.environ.get("HARBOR_KUBEVIRT_" + key)
+            try:
+                return int(value) if value is not None and value != "" else default
+            except ValueError:
+                raise ValueError(
+                    f"HARBOR_KUBEVIRT_{key} must be an integer, got {value!r}"
+                ) from None
+
+        ssh_port = as_int("SSH_PORT", 22)
+        start_timeout = as_int("START_TIMEOUT", 600)
+        command_timeout = as_int("COMMAND_TIMEOUT", 3600)
+        transfer_timeout = as_int("TRANSFER_TIMEOUT", 300)
         if min(start_timeout, command_timeout, transfer_timeout) <= 0:
             raise ValueError("Timeouts must be positive")
         if not 1 <= ssh_port <= 65535:

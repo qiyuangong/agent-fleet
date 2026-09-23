@@ -7,7 +7,6 @@ import base64
 import json
 import logging
 import re
-import shlex
 import tempfile
 import uuid
 from pathlib import Path, PureWindowsPath
@@ -41,22 +40,12 @@ def sftp_quote(value):
 
 
 class WindowsSSH:
-    def __init__(self, settings, name, local_dir):
-        self.settings, self.name = settings, name
+    def __init__(self, settings, name, ip, local_dir):
+        self.settings, self.name, self.ip = settings, name, ip
         self.local_dir = Path(local_dir)
         self.remote_root = f"C:/ProgramData/AgentFleet/{name}"
 
     def options(self):
-        proxy = shlex.join(
-            [
-                "virtctl",
-                *self.settings.kube_args(),
-                "port-forward",
-                "--stdio=true",
-                f"vmi/{self.name}",
-                str(self.settings.ssh_port),
-            ]
-        )
         return [
             "-F",
             "/dev/null",
@@ -69,6 +58,8 @@ class WindowsSSH:
             "-o",
             "ConnectTimeout=10",
             "-o",
+            "ConnectionAttempts=1",
+            "-o",
             "ServerAliveInterval=15",
             "-o",
             "ServerAliveCountMax=2",
@@ -77,9 +68,11 @@ class WindowsSSH:
             "-o",
             f"UserKnownHostsFile={self.local_dir / 'known_hosts'}",
             "-o",
-            f"ProxyCommand={proxy}",
+            f"HostName={self.ip}",
             "-o",
             f"User={self.settings.ssh_user}",
+            "-p",
+            str(self.settings.ssh_port),
         ]
 
     async def powershell(self, script, *, timeout=60):

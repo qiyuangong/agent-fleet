@@ -447,10 +447,6 @@ class PlatformControl:
     async def __aexit__(self, exc_type, exc, tb):
         await self.close()
 
-    @property
-    def client(self) -> httpx.AsyncClient:
-        return self._client
-
     async def close(self) -> None:
         await self._client.aclose()
 
@@ -461,14 +457,16 @@ class PlatformControl:
             "/virtualmachines", json=build_create_request(self.settings, name, ip, labels)
         )
         raise_for_platform(response)
-        return response.json()["data"]
+        body = response.json()
+        return body.get("data", {}) if isinstance(body, dict) else {}
 
     async def get(self, name: str) -> dict:
         response = await self._client.get(
             f"/virtualmachines/{self.settings.namespace}/{name}"
         )
         raise_for_platform(response)
-        return parse_vm(response.json()["data"])
+        body = response.json()
+        return parse_vm(body.get("data", {}) if isinstance(body, dict) else {})
 
     async def stop(self, name: str) -> dict:
         response = await self._client.put(
@@ -476,15 +474,16 @@ class PlatformControl:
             json={"namespace": self.settings.namespace, "name": name},
         )
         raise_for_platform(response)
-        return response.json()["data"]
+        body = response.json()
+        return body.get("data", {}) if isinstance(body, dict) else {}
 
     async def delete(self, name: str) -> dict:
         response = await self._client.delete(
             f"/virtualmachines/{self.settings.namespace}/{name}"
         )
         raise_for_platform(response)
-        data = response.json().get("data", {})
-        return data if isinstance(data, dict) else {}
+        body = response.json()
+        return body.get("data", {}) if isinstance(body, dict) else {}
 
     async def ping(self) -> bool:
         try:

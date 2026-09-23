@@ -15,7 +15,8 @@ Runs externally supplied Windows Harbor tasks on isolated KubeVirt VMs.
 Example: run_kubevirt_windows.sh --path /data/windows-tasks --n-concurrent 1
          run_kubevirt_windows.sh --path /data/windows-tasks --agent oracle
 
-Required: HARBOR_KUBEVIRT_TEMPLATE, HARBOR_KUBEVIRT_NAMESPACE,
+Required: HARBOR_KUBEVIRT_BASE_URL, HARBOR_KUBEVIRT_TOKEN,
+          HARBOR_KUBEVIRT_IMAGE, HARBOR_KUBEVIRT_NAMESPACE,
           HARBOR_KUBEVIRT_SSH_USER, HARBOR_KUBEVIRT_SSH_KEY.
 The default agent also requires HARBOR_WINDOWS_AGENT_COMMAND.
 See KUBEVIRT_WINDOWS_README.md for the VM and agent contracts.

@@ -15,32 +15,33 @@ directly by another project's Harbor configuration.
 
 - Prepare the pinned Harbor runner with repository setup. Workload startup only
   validates it; it does not install tools or download agent runtimes.
-- Install `kubectl`, a `virtctl` matching the cluster, and OpenSSH `ssh` / `sftp`
-  on the Linux runner. Provide kubeconfig through standard `KUBECONFIG` handling.
-- Permit VM creation, get, patch, deletion, and VMI get/watch and port forwarding
-  in the selected namespace. CDI must be able to clone the golden disk into
-  that namespace, with the storage class and cross-namespace clone permissions
-  configured by the cluster operator.
+- Install OpenSSH `ssh` / `sftp` on the Linux runner and confirm network
+  reachability to the platform HTTP API at `HARBOR_KUBEVIRT_BASE_URL`. No
+  `kubectl`, `virtctl`, or kubeconfig is required.
+- Provide a platform access token via `HARBOR_KUBEVIRT_TOKEN` with permission to
+  create/get/stop/delete VMs and read available IPs in the configured namespace.
+- The platform clones the selected golden image (`HARBOR_KUBEVIRT_IMAGE`) into a
+  fresh VM per trial, so no operator-owned VM manifest, DataVolume, or portable
+  disk clone is needed. The backend generates VM names and labels.
 - Prepare a versioned Windows image with VirtIO drivers, Windows PowerShell 5.1
   or later, OpenSSH Server with SFTP and key authentication, and the desired
   applications/agent already installed. The SSH account must be able to create
   `C:/ProgramData/AgentFleet`, `C:/logs`, and the task workspace. Commands execute
   as that account; alternate users and automatic privilege escalation are not
-  supported.
-- Use a VM manifest with `dataVolumeTemplates` for fresh disk clones, or
-  `containerDisk` for ephemeral disks. Existing PVC attachments, external
-  DataVolumes, host disks, and persistent TPM/EFI state are rejected. Each trial
-  gets newly named disks; restarting an existing VM is not the reset mechanism.
+  supported. Each trial gets a freshly cloned disk; restarting an existing VM is
+  not the reset mechanism.
 
-[vm.example.yaml](kubevirt_windows/vm.example.yaml) is a starting point. Copy it
-to an operator-owned location and match the original image's firmware and disk
-configuration. The backend generates VM/disk names, namespace, labels, and
-`runStrategy`; do not apply the example manually to start a trial. Preserve
-image versioning in the source PVC/DataSource reference.
+> **Platform image availability.** The platform template catalog currently
+> contains only Linux images (for example `ubuntu20.04-template-image`). Windows
+> guest readiness (`execute.ps1`) is therefore only confirmed once a Windows
+> golden image is provisioned. Lifecycle and direct-IP SSH plumbing can be
+> validated with a Linux image as a stand-in today, but the Windows-specific
+> `execute.ps1` contract remains untested until a Windows image exists.
 
-KubeVirt's [DataVolume lifecycle](https://kubevirt.io/user-guide/storage/disks_and_volumes/)
-owns the cloned storage, and foreground VM deletion requests cascading cleanup.
-The backend does not delete the golden source disk or shared credential Secrets.
+The platform owns the golden-image clone and VM lifecycle: each trial creates a
+fresh VM from `HARBOR_KUBEVIRT_IMAGE`, and teardown requests release the cloned
+storage. The backend does not delete the golden source image or the guest
+credential Secret the platform creates at VM creation.
 
 ## Configuration and launch
 
@@ -49,10 +50,10 @@ variables. Runtime environment values, including explicitly empty ones, override
 saved configuration.
 
 ```bash
-export KUBECONFIG=/path/to/kubeconfig
-export HARBOR_KUBEVIRT_CONTEXT=example-cluster
+export HARBOR_KUBEVIRT_BASE_URL=http://10.9.202.91:31600
+# export HARBOR_KUBEVIRT_TOKEN=replace-with-a-platform-access-token
+export HARBOR_KUBEVIRT_IMAGE=ubuntu20.04-template-image
 export HARBOR_KUBEVIRT_NAMESPACE=windows-benchmarks
-export HARBOR_KUBEVIRT_TEMPLATE=/path/to/windows-vm.yaml
 export HARBOR_KUBEVIRT_SSH_USER=runner
 export HARBOR_KUBEVIRT_SSH_KEY=/path/to/runner-key
 export HARBOR_WINDOWS_AGENT_COMMAND='C:\Agent\run-agent.cmd'
@@ -64,14 +65,19 @@ export HARBOR_WINDOWS_AGENT_COMMAND='C:\Agent\run-agent.cmd'
   --path /data/external-windows-tasks --n-concurrent 1
 ```
 
-Dry-run makes no cluster calls and deliberately does not print raw arguments,
-which may include secrets. It does not validate the image or cluster.
+Dry-run makes no platform API calls and deliberately does not print raw
+arguments, which may include secrets. It does not validate the image or the
+platform token.
 
 Optional settings:
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `HARBOR_KUBEVIRT_CONTEXT` | current kubeconfig context | Kubernetes context |
+| `HARBOR_KUBEVIRT_BASE_URL` | required | Platform HTTP API base URL (no trailing `/api/v1`) |
+| `HARBOR_KUBEVIRT_TOKEN` | required | Platform access token |
+| `HARBOR_KUBEVIRT_IMAGE` | required | Golden image name to clone per trial |
+| `HARBOR_KUBEVIRT_SUBNET` | `ovn-default` | Platform subnet for the VM IP |
+| `HARBOR_KUBEVIRT_STORAGE_CLASS` | `ceph-rbd-sc` | Platform storage class for the root disk |
 | `HARBOR_KUBEVIRT_SSH_PORT` | `22` | Guest SSH port |
 | `HARBOR_KUBEVIRT_START_TIMEOUT` | `600` | Total create/boot/guest-readiness deadline, seconds |
 | `HARBOR_KUBEVIRT_COMMAND_TIMEOUT` | `3600` | Command deadline when Harbor supplies none |
@@ -81,7 +87,7 @@ Optional settings:
 | `HARBOR_WINDOWS_AGENT_VERSION` | unknown | Version recorded in Harbor results |
 
 Harbor's own environment/agent/verifier deadlines still apply. Configure the
-external tasks' startup timeout to allow Windows boot and disk cloning.
+external tasks' startup timeout to allow Windows boot and image cloning.
 `OPIK_URL` selects the existing `opik harbor` wrapper when nonempty; an empty
 value selects Harbor directly. The command bridge does not emit ATIF trajectories
 or agent-specific realtime tracing hooks.
@@ -147,10 +153,11 @@ truncation marker. Full per-command output stays under
 The command bridge redirects agent output to Harbor's collected logs.
 Output callbacks fire when a command completes, not continuously.
 
-SSH traffic travels through `virtctl port-forward` and the Kubernetes API.
-The first guest host key is accepted through that authenticated tunnel and
-pinned in a private per-instance known-hosts file. Changed keys are rejected.
-At large concurrency, account for API-server port-forward traffic.
+SSH and SFTP connect directly to the VM's assigned IP address on the configured
+`HARBOR_KUBEVIRT_SSH_PORT` (no `virtctl` port-forward). The first guest host key
+is accepted through that direct connection and pinned in a private per-instance
+`known_hosts` file; changed keys are rejected. Verify that the runner can route
+to the VM subnet.
 
 Startup failures and cancellation attempt VM cleanup. Normal `stop(delete=True)`
 checks the trial ownership label and requests foreground deletion. Harbor's
@@ -176,6 +183,7 @@ ruff check --config .github/ruff.toml \
 bash -n Agents/utils/common/Harbor/run_kubevirt_windows.sh
 ```
 
-Tests use the real pinned Harbor interfaces with mocked cluster/SSH operations.
-They do not boot Windows. Guest PowerShell behavior, image compatibility, RBAC,
-CDI cleanup, and actual Windows agent execution require a later live validation.
+Tests use the real pinned Harbor interfaces with a mocked HTTP transport and SSH
+operations. They do not boot Windows. Guest PowerShell behavior, image
+compatibility, platform RBAC, and actual Windows agent execution require a
+later live validation.

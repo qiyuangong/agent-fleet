@@ -199,6 +199,7 @@ class KubeVirtWindowsEnvironment(BaseEnvironment):
             if self._local_dir is not None:
                 self._local_dir.cleanup()
                 self._local_dir = None
+            await self.control.close()
 
     def _guest(self):
         if not self._started or self.transport is None:

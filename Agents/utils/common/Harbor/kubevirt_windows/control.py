@@ -76,13 +76,25 @@ async def run_process(
     return stdout
 
 
+URL_RE = re.compile(r"^https?://", re.IGNORECASE)
+NS_RE = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?")
+
+
+@dataclass(frozen=True)
+class Platform:
+    base_url: str
+    token: str
+
+
 @dataclass(frozen=True)
 class Settings:
-    template: Path
+    platform: Platform
+    image: str
     namespace: str
     ssh_user: str
     ssh_key: Path
-    context: str = ""
+    subnet: str
+    storage_class: str
     ssh_port: int = 22
     start_timeout: int = 600
     command_timeout: int = 3600
@@ -96,49 +108,42 @@ class Settings:
                 raise ValueError(f"HARBOR_KUBEVIRT_{key} is required")
             return value
 
-        settings = cls(
-            template=Path(required("TEMPLATE")).expanduser(),
-            namespace=required("NAMESPACE"),
-            ssh_user=required("SSH_USER"),
-            ssh_key=Path(required("SSH_KEY")).expanduser(),
-            context=os.environ.get("HARBOR_KUBEVIRT_CONTEXT", ""),
-            ssh_port=int(os.environ.get("HARBOR_KUBEVIRT_SSH_PORT", "22")),
-            start_timeout=int(os.environ.get("HARBOR_KUBEVIRT_START_TIMEOUT", "600")),
-            command_timeout=int(
-                os.environ.get("HARBOR_KUBEVIRT_COMMAND_TIMEOUT", "3600")
-            ),
-            transfer_timeout=int(
-                os.environ.get("HARBOR_KUBEVIRT_TRANSFER_TIMEOUT", "300")
-            ),
-        )
-        if not re.fullmatch(
-            r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", settings.namespace
-        ):
+        base_url = required("BASE_URL")
+        if not URL_RE.match(base_url):
+            raise ValueError("HARBOR_KUBEVIRT_BASE_URL must use http:// or https://")
+        namespace = required("NAMESPACE")
+        if not NS_RE.fullmatch(namespace):
             raise ValueError("Invalid Kubernetes namespace")
-        if not settings.ssh_user or any(c in settings.ssh_user for c in "\r\n\x00@"):
+        ssh_user = required("SSH_USER")
+        if not ssh_user or any(c in ssh_user for c in "\r\n\x00@"):
             raise ValueError("Invalid SSH user")
-        for path in (settings.template, settings.ssh_key):
-            if not path.is_file():
-                raise FileNotFoundError(path)
-        if not 1 <= settings.ssh_port <= 65535:
-            raise ValueError("SSH port must be between 1 and 65535")
-        if (
-            min(
-                settings.start_timeout,
-                settings.command_timeout,
-                settings.transfer_timeout,
-            )
-            <= 0
-        ):
+        ssh_key = Path(required("SSH_KEY")).expanduser()
+        if not ssh_key.is_file():
+            raise FileNotFoundError(ssh_key)
+        image = required("IMAGE")
+        subnet = os.environ.get("HARBOR_KUBEVIRT_SUBNET", "ovn-default")
+        storage_class = os.environ.get("HARBOR_KUBEVIRT_STORAGE_CLASS", "ceph-rbd-sc")
+        ssh_port = int(os.environ.get("HARBOR_KUBEVIRT_SSH_PORT", "22"))
+        start_timeout = int(os.environ.get("HARBOR_KUBEVIRT_START_TIMEOUT", "600"))
+        command_timeout = int(os.environ.get("HARBOR_KUBEVIRT_COMMAND_TIMEOUT", "3600"))
+        transfer_timeout = int(os.environ.get("HARBOR_KUBEVIRT_TRANSFER_TIMEOUT", "300"))
+        if min(start_timeout, command_timeout, transfer_timeout) <= 0:
             raise ValueError("Timeouts must be positive")
-        return settings
-
-    def kube_args(self):
-        # KUBECONFIG is inherited (and may contain several paths).
-        return (["--context", self.context] if self.context else []) + [
-            "--namespace",
-            self.namespace,
-        ]
+        if not 1 <= ssh_port <= 65535:
+            raise ValueError("SSH port must be between 1 and 65535")
+        return cls(
+            platform=Platform(base_url=base_url, token=required("TOKEN")),
+            image=image,
+            namespace=namespace,
+            ssh_user=ssh_user,
+            ssh_key=ssh_key,
+            subnet=subnet,
+            storage_class=storage_class,
+            ssh_port=ssh_port,
+            start_timeout=start_timeout,
+            command_timeout=command_timeout,
+            transfer_timeout=transfer_timeout,
+        )
 
 
 def build_manifest(template, name, namespace, token, *, cpus=None, memory_mb=None):

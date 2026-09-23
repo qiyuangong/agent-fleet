@@ -18,11 +18,13 @@ from harbor.models.task.config import TaskOS
 from harbor.utils.path_filter import filter_paths_by_patterns
 
 from .control import (
+    DEFAULT_DISK_SIZE,
     OWNER_LABEL,
     PlatformAPIError,
     PlatformControl,
     Settings,
     _api_base,
+    pick_root_disk_size,
     raise_for_platform,
 )
 from .transport import WindowsSSH, windows_path
@@ -137,7 +139,7 @@ class KubeVirtWindowsEnvironment(BaseEnvironment):
                     "namespace": self.settings.namespace,
                     "subnet": self.settings.subnet,
                     "ip": ip,
-                    "labels": {"key": OWNER_LABEL, "value": tag},
+                    "labels": {OWNER_LABEL: tag},
                 },
                 indent=2,
             )
@@ -146,12 +148,18 @@ class KubeVirtWindowsEnvironment(BaseEnvironment):
         )
         try:
             async with asyncio.timeout(self.settings.start_timeout):
+                # Disk must be >= the source template's minSize to clone.
+                min_size = await self.control.image_min_size(self.settings.image)
+                disk_size = pick_root_disk_size(DEFAULT_DISK_SIZE, min_size)
                 await self.control.create(
                     self.vm_name,
                     ip,
-                    labels=[{"key": OWNER_LABEL, "value": tag}],
+                    labels={OWNER_LABEL: tag},
+                    disk_size=disk_size,
                 )
                 self._created = True
+                # Create leaves the VM defined/Stopped; power it on explicitly.
+                await self.control.start(self.vm_name)
                 while True:
                     vm = await self.control.get(self.vm_name)
                     if vm.get("ready") and vm.get("ip"):

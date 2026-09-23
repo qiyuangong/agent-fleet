@@ -79,7 +79,7 @@ Optional settings:
 | `HARBOR_KUBEVIRT_SUBNET` | `ovn-default` | Platform subnet for the VM IP |
 | `HARBOR_KUBEVIRT_STORAGE_CLASS` | `ceph-rbd-sc` | Platform storage class for the root disk |
 | `HARBOR_KUBEVIRT_SSH_PORT` | `22` | Guest SSH port |
-| `HARBOR_KUBEVIRT_START_TIMEOUT` | `600` | Total create/boot/guest-readiness deadline, seconds |
+| `HARBOR_KUBEVIRT_START_TIMEOUT` | `1800` | Total create/clone/boot/guest-readiness deadline, seconds. Template-image provisioning alone can take ~10 min; keep this generous |
 | `HARBOR_KUBEVIRT_COMMAND_TIMEOUT` | `3600` | Command deadline when Harbor supplies none |
 | `HARBOR_KUBEVIRT_TRANSFER_TIMEOUT` | `300` | Per-transfer deadline, seconds |
 | `HARBOR_WINDOWS_AGENT_COMMAND` | required for default bridge | Prepared Windows command/entrypoint |
@@ -98,7 +98,10 @@ The consuming project declares `[environment].os = "windows"`. An optional
 Windows absolute `workdir` is created on startup; otherwise commands run in
 `C:/workspace`. The task's `cpus` and `memory_mb` override the image template's
 CPU and guest RAM. Disk size is configured in the template; `storage_mb` is
-rejected. The backend supports CPU/memory limit policies, not Kubernetes request
+rejected. The backend sizes the root disk to at least the source template's
+`minSize` (a template-image clone cannot be smaller than its source), then
+sends an explicit power-on after create (create defines the VM in a Stopped
+state). It supports CPU/memory limit policies, not Kubernetes request
 or guarantee policies.
 
 Select this environment through Harbor's supported import path:

@@ -20,6 +20,7 @@ from kubevirt_windows.control import (
     PlatformControl,
     Settings,
     build_create_request,
+    pick_root_disk_size,
 )
 
 VALID_ENV = {
@@ -135,10 +136,11 @@ class CreateRequestTests(unittest.TestCase):
             },
         )
         self.assertNotIn("labels", request)
+        self.assertIsInstance(request["storage"]["rootDisk"]["size"], str)
 
     def test_build_create_request_includes_labels_when_provided(self):
         settings = build_settings()
-        labels = [{"key": "agent-fleet/trial", "value": "abc"}]
+        labels = {"agent-fleet/trial": "abc"}
         request = build_create_request(settings, "trial-a1b2", "10.16.0.4", labels)
         self.assertEqual(request["labels"], labels)
 
@@ -182,7 +184,9 @@ class PlatformControlTests(unittest.IsolatedAsyncioTestCase):
                         },
                     },
                 )
-            if request.method == "PUT" and path.endswith("/virtualmachines/stop"):
+            if request.method == "PUT" and path.endswith("/start"):
+                return httpx.Response(200, json={"code": 200, "message": "ok", "data": {}})
+            if request.method == "PUT" and path.endswith("/stop"):
                 return httpx.Response(200, json={"code": 200, "message": "ok", "data": {}})
             if request.method == "DELETE":
                 return httpx.Response(200, json={"code": 200, "message": "ok", "data": {}})
@@ -198,26 +202,28 @@ class PlatformControlTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(vm["status"], "Running")
             self.assertEqual(vm["uid"], "uid-1")
             await control.stop("trial-a1b2")
+            await control.start("trial-a1b2")
             await control.delete("trial-a1b2")
 
         methods = [c[0] for c in calls]
         self.assertEqual(
-            methods, ["POST", "GET", "PUT", "DELETE"]
+            methods, ["POST", "GET", "PUT", "PUT", "DELETE"]
         )
         self.assertEqual(
             [c[1] for c in calls],
             [
                 "/api/v1/virtualmachines",
                 "/api/v1/virtualmachines/default/trial-a1b2",
-                "/api/v1/virtualmachines/stop",
+                "/api/v1/virtualmachines/default/trial-a1b2/stop",
+                "/api/v1/virtualmachines/default/trial-a1b2/start",
                 "/api/v1/virtualmachines/default/trial-a1b2",
             ],
         )
         create_body = json.loads(calls[0][2])
         self.assertEqual(create_body["name"], "trial-a1b2")
         self.assertEqual(create_body["network"]["ipAddress"], "10.16.0.4")
-        stop_body = json.loads(calls[2][2])
-        self.assertEqual(stop_body, {"namespace": "default", "name": "trial-a1b2"})
+        self.assertEqual(calls[2][2], "")  # stop sends no body
+        self.assertEqual(calls[3][2], "")  # start sends no body
 
     async def test_raise_for_envelope_error(self):
         def handler(request: httpx.Request) -> httpx.Response:
@@ -240,6 +246,37 @@ class PlatformControlTests(unittest.IsolatedAsyncioTestCase):
         async with control:
             with self.assertRaises(httpx.HTTPStatusError):
                 await control.get("trial-a1b2")
+
+    async def test_image_min_size_route(self):
+        calls = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            calls.append((request.method, request.url.path))
+            return httpx.Response(
+                200,
+                json={
+                    "code": 200,
+                    "message": "success",
+                    "data": {"name": "ubuntu20.04-template-image", "minSize": "40Gi"},
+                },
+            )
+
+        control = self._control(handler)
+        async with control:
+            min_size = await control.image_min_size()
+        self.assertEqual(min_size, "40Gi")
+        self.assertEqual(
+            calls, [("GET", "/api/v1/images/default/ubuntu20.04-template-image")]
+        )
+
+    def test_pick_root_disk_size_uses_template_min(self):
+        # clone must be >= source minSize
+        self.assertEqual(pick_root_disk_size("32Gi", "40Gi"), "40Gi")
+        self.assertEqual(pick_root_disk_size("40Gi", "40Gi"), "40Gi")
+        self.assertEqual(pick_root_disk_size("64Gi", "40Gi"), "64Gi")
+        # unknown minSize falls back to configured default
+        self.assertEqual(pick_root_disk_size("32Gi", None), "32Gi")
+        self.assertEqual(pick_root_disk_size("32Gi", ""), "32Gi")
 
     async def test_ping_ok(self):
         captured = []

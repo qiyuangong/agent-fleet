@@ -197,7 +197,9 @@ class EnvironmentTests(unittest.IsolatedAsyncioTestCase):
     async def test_start_waits_for_guest_and_creates_log_dirs(self):
         environment = self.environment()
         environment.control.available_ips = AsyncMock(return_value=["10.9.202.100"])
+        environment.control.image_min_size = AsyncMock(return_value="40Gi")
         environment.control.create = AsyncMock()
+        environment.control.start = AsyncMock()
         environment.control.get = AsyncMock(
             return_value={
                 "name": environment.vm_name,
@@ -213,7 +215,13 @@ class EnvironmentTests(unittest.IsolatedAsyncioTestCase):
             transport_class.return_value = AsyncMock()
             await environment.start()
         self.assertTrue(environment._started)
+        environment.control.image_min_size.assert_awaited_once_with(
+            environment.settings.image
+        )
         environment.control.create.assert_awaited_once()
+        _, kwargs = environment.control.create.await_args
+        self.assertEqual(kwargs["disk_size"], "40Gi")
+        environment.control.start.assert_awaited_once_with(environment.vm_name)
         environment.transport.probe.assert_awaited_once()
         self.assertEqual(environment.transport.mkdir.await_count, 4)
         metadata = json.loads((self.root / "trial/kubevirt.json").read_text())
@@ -230,6 +238,7 @@ class EnvironmentTests(unittest.IsolatedAsyncioTestCase):
     async def test_failed_start_cleans_up(self):
         environment = self.environment()
         environment.control.available_ips = AsyncMock(return_value=["10.9.202.100"])
+        environment.control.image_min_size = AsyncMock(return_value="40Gi")
         environment.control.create = AsyncMock(
             side_effect=RuntimeError("creation failed")
         )
@@ -246,6 +255,7 @@ class EnvironmentTests(unittest.IsolatedAsyncioTestCase):
     async def test_cancelled_start_cleans_up(self):
         environment = self.environment()
         environment.control.available_ips = AsyncMock(return_value=["10.9.202.100"])
+        environment.control.image_min_size = AsyncMock(return_value="40Gi")
         environment.control.create = AsyncMock(side_effect=asyncio.CancelledError)
         environment.control.stop = AsyncMock()
         environment.control.delete = AsyncMock()

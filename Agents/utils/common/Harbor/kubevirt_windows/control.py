@@ -17,7 +17,64 @@ OWNER_LABEL = "agent-fleet/trial"
 DEFAULT_CPU_CORES = 2
 DEFAULT_CPU_SOCKETS = 1
 DEFAULT_MEMORY_GUEST = "4Gi"
-DEFAULT_DISK_SIZE = 32
+DEFAULT_DISK_SIZE = "32Gi"  # minimum rootDisk size; the larger of this and the source template's minSize wins
+
+
+_QUANTITY_UNITS = {
+    "Ki": 1 << 10,
+    "Mi": 1 << 20,
+    "Gi": 1 << 30,
+    "Ti": 1 << 40,
+    "Pi": 1 << 50,
+    "K": 10**3,
+    "M": 10**6,
+    "G": 10**9,
+    "T": 10**12,
+    "P": 10**15,
+}
+
+
+def _quantity_bytes(value) -> int | None:
+    """Parse a Kubernetes quantity string (e.g. "40Gi", "5G") into bytes.
+
+    Returns None for unparseable values so callers can fall back safely.
+    Only the suffixes the platform emits for disk sizes (Ki/Mi/Gi/Ti, K/M/G/T)
+    are handled; bare integers are treated as bytes.
+    """
+    if isinstance(value, (int, float)):
+        return int(value)
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    if not value:
+        return None
+    for suffix, factor in _QUANTITY_UNITS.items():
+        if value.endswith(suffix):
+            number = value[: -len(suffix)].strip()
+            try:
+                return int(float(number) * factor)
+            except ValueError:
+                return None
+    try:
+        return int(value)
+    except ValueError:
+        return None
+
+
+def pick_root_disk_size(configured: str, min_size: str | None) -> str:
+    """Choose the root disk size for a create request.
+
+    A clone of a template image must be at least as large as the source
+    image's minSize, otherwise CDI provisioning hangs/fails. Returns the
+    larger of the configured default and the template minSize (when known).
+    """
+    configured_bytes = _quantity_bytes(configured)
+    min_bytes = _quantity_bytes(min_size) if min_size else None
+    if configured_bytes is None and min_bytes is None:
+        return configured
+    if min_bytes is None or (configured_bytes is not None and configured_bytes >= min_bytes):
+        return configured
+    return min_size or configured
 
 # Lowercase RFC 1123 DNS subdomain (max 63): what the platform requires for VM
 # names because it auto-creates a guest-credential Secret named after the VM.
@@ -108,7 +165,7 @@ class Settings:
     subnet: str
     storage_class: str
     ssh_port: int = 22
-    start_timeout: int = 600
+    start_timeout: int = 1800
     command_timeout: int = 3600
     transfer_timeout: int = 300
 
@@ -146,7 +203,7 @@ class Settings:
                 ) from None
 
         ssh_port = as_int("SSH_PORT", 22)
-        start_timeout = as_int("START_TIMEOUT", 600)
+        start_timeout = as_int("START_TIMEOUT", 1800)
         command_timeout = as_int("COMMAND_TIMEOUT", 3600)
         transfer_timeout = as_int("TRANSFER_TIMEOUT", 300)
         if min(start_timeout, command_timeout, transfer_timeout) <= 0:
@@ -193,9 +250,15 @@ def raise_for_platform(response: httpx.Response) -> None:
 
 
 def build_create_request(
-    settings: Settings, name: str, ip: str, labels: list[dict] | None = None
+    settings: Settings, name: str, ip: str, labels: dict | None = None, disk_size: str = DEFAULT_DISK_SIZE
 ) -> dict:
-    """Build the CreateVMRequest envelope accepted by POST /virtualmachines."""
+    """Build the CreateVMRequest envelope accepted by POST /virtualmachines.
+
+    `labels` is an operator metadata map (e.g. {OWNER_LABEL: tag}); the platform
+    declares CreateVMRequest.labels as an object of string values. `disk_size`
+    is the root disk size as a Kubernetes quantity string (e.g. "40Gi"); callers
+    should pass the larger of the default and the source template's minSize.
+    """
     if not name or not RFC1123_NAME_RE.fullmatch(name):
         raise ValueError(
             "VM name must be a lowercase RFC1123 DNS subdomain (max 63 chars)"
@@ -215,7 +278,7 @@ def build_create_request(
         "storage": {
             "rootDisk": {
                 "imageName": settings.image,
-                "size": DEFAULT_DISK_SIZE,
+                "size": disk_size,
                 "storageClassName": settings.storage_class,
             }
         },
@@ -279,14 +342,33 @@ class PlatformControl:
         await self._client.aclose()
 
     async def create(
-        self, name: str, ip: str, labels: list[dict] | None = None
+        self, name: str, ip: str, labels: dict | None = None, disk_size: str = DEFAULT_DISK_SIZE
     ) -> dict:
         response = await self._client.post(
-            "/virtualmachines", json=build_create_request(self.settings, name, ip, labels)
+            "/virtualmachines",
+            json=build_create_request(self.settings, name, ip, labels, disk_size),
         )
         raise_for_platform(response)
         body = response.json()
         return body.get("data", {}) if isinstance(body, dict) else {}
+
+    async def image_min_size(self, image: str | None = None) -> str | None:
+        """Return the source image/template's minSize (e.g. "40Gi") or None.
+
+        A clone of a template must be at least this large to provision; the
+        caller should size the root disk to at least this value.
+        """
+        image = image or self.settings.image
+        if not image:
+            return None
+        response = await self._client.get(
+            f"/images/{self.settings.namespace}/{image}"
+        )
+        raise_for_platform(response)
+        body = response.json()
+        data = body.get("data", {}) if isinstance(body, dict) else {}
+        min_size = data.get("minSize") if isinstance(data, dict) else None
+        return min_size if isinstance(min_size, str) and min_size else None
 
     async def get(self, name: str) -> dict:
         response = await self._client.get(
@@ -316,10 +398,19 @@ class PlatformControl:
             raise PlatformAPIError("available-ips returned unexpected shape")
         return [ip for ip in ips if isinstance(ip, str) and ip]
 
+    async def start(self, name: str) -> dict:
+        """Power on an existing VM. Create leaves the VM defined/Stopped and an
+        explicit start is required before the guest boots and becomes ready."""
+        response = await self._client.put(
+            f"/virtualmachines/{self.settings.namespace}/{name}/start"
+        )
+        raise_for_platform(response)
+        body = response.json()
+        return body.get("data", {}) if isinstance(body, dict) else {}
+
     async def stop(self, name: str) -> dict:
         response = await self._client.put(
-            "/virtualmachines/stop",
-            json={"namespace": self.settings.namespace, "name": name},
+            f"/virtualmachines/{self.settings.namespace}/{name}/stop"
         )
         raise_for_platform(response)
         body = response.json()

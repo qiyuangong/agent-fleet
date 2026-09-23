@@ -1,0 +1,47 @@
+# Copy to an operator-owned file and match the prepared image's firmware,
+# storage class, disk capacity, and network configuration. No guest credentials.
+apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: windows-template
+spec:
+  runStrategy: Halted
+  dataVolumeTemplates:
+    - metadata:
+        name: windows-root
+      spec:
+        source:
+          pvc:
+            namespace: windows-images
+            name: windows-golden-v1
+        storage:
+          accessModes: [ReadWriteOnce]
+          resources:
+            requests:
+              storage: 64Gi
+  template:
+    spec:
+      domain:
+        cpu:
+          cores: 2
+        memory:
+          guest: 8Gi
+        firmware:
+          bootloader:
+            efi:
+              secureBoot: false
+        devices:
+          disks:
+            - name: root
+              disk:
+                bus: virtio
+          interfaces:
+            - name: default
+              masquerade: {}
+      networks:
+        - name: default
+          pod: {}
+      volumes:
+        - name: root
+          dataVolume:
+            name: windows-root

@@ -10,10 +10,25 @@ import re
 import signal
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
+import httpx
 import yaml
 
 OWNER_LABEL = "agent-fleet/trial"
+
+DEFAULT_CPU_CORES = 2
+DEFAULT_CPU_SOCKETS = 1
+DEFAULT_MEMORY_GUEST = "4Gi"
+DEFAULT_DISK_SIZE = 32
+
+# Lowercase RFC 1123 DNS subdomain (max 63): what the platform requires for VM
+# names because it auto-creates a guest-credential Secret named after the VM.
+RFC1123_NAME_RE = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?")
+
+
+class PlatformAPIError(RuntimeError):
+    """Raised when the platform returns a non-2xx HTTP status or envelope code."""
 
 
 async def run_process(
@@ -323,3 +338,158 @@ class VMControl:
 
 def load_template(path):
     return yaml.safe_load(path.read_text(encoding="utf-8"))
+
+
+def _api_base(base_url: str) -> str:
+    """Normalize a human-supplied base URL into the API v1 endpoint."""
+    return base_url.rstrip("/") + "/api/v1"
+
+
+def raise_for_platform(response: httpx.Response) -> None:
+    """Raise if the HTTP status or the envelope's `code` is not 2xx."""
+    try:
+        response.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        raise exc from None
+    try:
+        payload = response.json()
+    except (ValueError, TypeError):
+        return  # No JSON envelope to inspect; the HTTP status already passed.
+    if not isinstance(payload, dict):
+        return
+    code = payload.get("code")
+    if isinstance(code, int) and not 200 <= code < 300:
+        raise PlatformAPIError(
+            f"Platform API error (code={code}): {payload.get('message', '')}"
+        )
+
+
+def build_create_request(
+    settings: Settings, name: str, ip: str, labels: list[dict] | None = None
+) -> dict:
+    """Build the CreateVMRequest envelope accepted by POST /virtualmachines."""
+    if not name or not RFC1123_NAME_RE.fullmatch(name):
+        raise ValueError(
+            "VM name must be a lowercase RFC1123 DNS subdomain (max 63 chars)"
+        )
+    if not ip:
+        raise ValueError("A subnet IP address is required")
+    request: dict[str, Any] = {
+        "name": name,
+        "namespace": settings.namespace,
+        "createType": "template",
+        "compute": {
+            "cpuCores": DEFAULT_CPU_CORES,
+            "cpuSockets": DEFAULT_CPU_SOCKETS,
+            "memoryGuest": DEFAULT_MEMORY_GUEST,
+        },
+        "network": {"subnetName": settings.subnet, "ipAddress": ip},
+        "storage": {
+            "rootDisk": {
+                "imageName": settings.image,
+                "size": DEFAULT_DISK_SIZE,
+                "storageClassName": settings.storage_class,
+            }
+        },
+    }
+    if labels:
+        request["labels"] = labels
+    return request
+
+
+def _as_bool(value) -> bool:
+    """Coerce a ready flag that may arrive as bool, int, or string."""
+    if isinstance(value, str):
+        return value.strip().lower() in ("true", "1", "yes")
+    return bool(value)
+
+
+def parse_vm(data: dict) -> dict:
+    """Normalize a GET VM `data` payload into a stable, tolerant dict."""
+    metadata = data.get("metadata") or {}
+    labels = data.get("labels") or metadata.get("labels") or {}
+    return {
+        "name": data.get("name") or metadata.get("name") or "",
+        "namespace": data.get("namespace") or metadata.get("namespace") or "",
+        "ip": data.get("ipAddress") or "",
+        "ready": _as_bool(data.get("ready")),
+        "labels": labels,
+        "status": data.get("printableStatus")
+        or data.get("status")
+        or (metadata.get("status") or ""),
+        "uid": data.get("uid") or metadata.get("uid") or "",
+    }
+
+
+class PlatformControl:
+    """Async client for the platform HTTP VM lifecycle API.
+
+    Replaces the kubectl-based VMControl. Uses direct bearer-token auth; the
+    client is created per instance and never performs I/O at import time.
+    """
+
+    def __init__(
+        self,
+        settings: Settings,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ):
+        self.settings = settings
+        self._client = httpx.AsyncClient(
+            base_url=_api_base(settings.platform.base_url),
+            headers={"Authorization": f"Bearer {settings.platform.token}"},
+            timeout=httpx.Timeout(30.0),
+            transport=transport,
+        )
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        await self.close()
+
+    @property
+    def client(self) -> httpx.AsyncClient:
+        return self._client
+
+    async def close(self) -> None:
+        await self._client.aclose()
+
+    async def create(
+        self, name: str, ip: str, labels: list[dict] | None = None
+    ) -> dict:
+        response = await self._client.post(
+            "/virtualmachines", json=build_create_request(self.settings, name, ip, labels)
+        )
+        raise_for_platform(response)
+        return response.json()["data"]
+
+    async def get(self, name: str) -> dict:
+        response = await self._client.get(
+            f"/virtualmachines/{self.settings.namespace}/{name}"
+        )
+        raise_for_platform(response)
+        return parse_vm(response.json()["data"])
+
+    async def stop(self, name: str) -> dict:
+        response = await self._client.put(
+            "/virtualmachines/stop",
+            json={"namespace": self.settings.namespace, "name": name},
+        )
+        raise_for_platform(response)
+        return response.json()["data"]
+
+    async def delete(self, name: str) -> dict:
+        response = await self._client.delete(
+            f"/virtualmachines/{self.settings.namespace}/{name}"
+        )
+        raise_for_platform(response)
+        data = response.json().get("data", {})
+        return data if isinstance(data, dict) else {}
+
+    async def ping(self) -> bool:
+        try:
+            response = await self._client.get("/users/me")
+            raise_for_platform(response)
+            return True
+        except (httpx.HTTPError, PlatformAPIError):
+            return False

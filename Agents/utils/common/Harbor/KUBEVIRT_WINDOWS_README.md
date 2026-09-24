@@ -37,6 +37,16 @@ directly by another project's Harbor configuration.
 > golden image is provisioned. Lifecycle and direct-IP SSH plumbing can be
 > validated with a Linux image as a stand-in today, but the Windows-specific
 > `execute.ps1` contract remains untested until a Windows image exists.
+>
+> **Direct-IP SSH caveat (live-validated).** Against this platform from the
+> runner, SSH does **not** complete: the runner establishes the TCP connection
+> to the VM's overlay IP but the handshake times out at banner exchange, and the
+> platform injects no SSH key (there is no cloud-init/access-credential API; the
+> guest agent reports Offline). The only interactive access path exposed by the
+> platform is the VNC/WebSocket console (`vnc/ws`, standard RFB, reachable
+> through the gateway), not SSH. Control-plane lifecycle is fully validated; the
+> SSH `execute.ps1` execution transport still requires a runner with route/key
+> to the VM overlay.
 
 The platform owns the golden-image clone and VM lifecycle: each trial creates a
 fresh VM from `HARBOR_KUBEVIRT_IMAGE`, and teardown requests release the cloned

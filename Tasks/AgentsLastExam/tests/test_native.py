@@ -15,6 +15,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, Mock, patch
 
 from ale_adapter.source import REVISION, source_digest
+from harbor.environments.base import ExecResult
 from harbor.models.trial.config import TrialConfig
 from harbor.trial.trial import Trial
 from kubevirt_windows.control import Cluster, Settings
@@ -32,13 +33,16 @@ class NativeTrialTests(unittest.IsolatedAsyncioTestCase):
     async def test_linux_native_trial(self):
         await self.native_trial("linux")
 
-    async def test_linux_setup_failure_releases_vm(self):
+    async def test_linux_sbx_native_trial(self):
+        await self.native_trial("linux", backend_mode="sbx")
+
+    async def test_linux_setup_failure_cleans_sandbox(self):
         await self.native_trial("linux", fail_setup=True)
 
-    async def test_linux_setup_timeout_releases_vm(self):
+    async def test_linux_setup_timeout_cleans_sandbox(self):
         await self.native_trial("linux", cancel_setup=True)
 
-    async def native_trial(self, os_type, fail_setup=False, cancel_setup=False):
+    async def native_trial(self, os_type, fail_setup=False, cancel_setup=False, backend_mode="docker"):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             source = root / "source"
@@ -87,11 +91,9 @@ async def evaluate(task, session):
                       "resolution": [1024, 768], "revision": REVISION, "source_sha256": source_digest(source)}
             (task / "environment/ale.json").write_text(json.dumps(native))
             mapping = root / "images.json"
-            disk = root / "base.qcow2"
-            disk.write_bytes(b"fixture disk")
             mapping.write_text(json.dumps({
                 "cpu-free": {"pvc": "ale-cpu-free", "image_family": "ale-win10"},
-                "cpu-free-ubuntu": {"image_family": "ale-ubuntu22", "qemu": {"disk_source": str(disk)}}}))
+                "cpu-free-ubuntu": {"image_family": "ale-ubuntu22", "docker_image": "example/ale:fixture", "cua_port": 5000}}))
             files, phases = {}, []
 
             class Handler(BaseHTTPRequestHandler):
@@ -187,34 +189,62 @@ async def evaluate(task, session):
                           "kwargs": {"command": "C:\\Agent\\run.cmd", "linux_command": "/opt/agent/run.sh"}},
                 "verifier": {"import_path": "ale_adapter.verifier:ALEVerifier"},
             })
-            original_spawn = asyncio.create_subprocess_exec
-            async def spawn(*args, **kwargs):
-                if "ale_adapter.linux_worker" in args:
-                    # Mock only VM provisioning in the separate native interpreter.
-                    # Guest I/O, task setup/grading, the agent and Harbor remain real.
-                    code = f'''
-import sys
-sys.path.insert(0, {str(source)!r})
-from ale_run.environments.providers.qemu import QemuProvider
-from ale_run.base_interface import SandboxHandle
-from ale_run.environments.images import get
-async def acquire(self, spec):
-    assert spec.os == "linux" and spec.vcpus == 4 and spec.memory_gb == 16
-    return SandboxHandle(id="fixture", endpoint={endpoint!r}, os="linux", **get("ale-ubuntu22").sandbox_paths())
-async def release(self, sandbox, mode="delete"):
-    assert mode == "delete"
-    await sandbox.run_command("fixture-release")
-QemuProvider.acquire = acquire
-QemuProvider.release = release
-from ale_adapter.linux_worker import main
-sys.argv = ["linux_worker", {str(root / "trials/ale-native-fixture/ale-worker.json")!r}]
-main()
-'''
-                    return await original_spawn(args[0], "-c", code, **kwargs)
-                return await original_spawn(*args, **kwargs)
+            # Emulate a Harbor backend's remote filesystem/processes. The HTTP
+            # forwarding helper, proxy, native driver and Harbor trial run unchanged.
+            guest_files = {}
+            native_spawn = asyncio.create_subprocess_exec
+            linux = Mock()
+            linux.start = AsyncMock()
+            async def cleanup(delete=True):
+                if not phases or phases[-1] != "cleanup":
+                    phases.append("cleanup")
+            linux.stop = AsyncMock(side_effect=cleanup)
+            async def upload(source_path, target_path):
+                guest_files[str(target_path)] = Path(source_path).read_bytes()
+            async def download(source_path, target_path):
+                Path(target_path).parent.mkdir(parents=True, exist_ok=True)
+                Path(target_path).write_bytes(guest_files[str(source_path)])
+            async def execute_linux(command, **kwargs):
+                if "/forward.py" in command:
+                    args = shlex.split(command)
+                    request = json.loads(guest_files[args[-2]])
+                    request["url"] = request["url"].replace("http://127.0.0.1:5000", endpoint)
+                    with tempfile.TemporaryDirectory() as forward_tmp:
+                        forward_root = Path(forward_tmp)
+                        (forward_root / "forward.py").write_bytes(guest_files[args[1]])
+                        (forward_root / "request.json").write_text(json.dumps(request))
+                        process = await native_spawn(PYTHON, str(forward_root / "forward.py"),
+                            str(forward_root / "request.json"), str(forward_root / "response"),
+                            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+                        stdout, stderr = await process.communicate()
+                        for suffix in (".json", ".body"):
+                            if (forward_root / ("response" + suffix)).exists():
+                                guest_files[args[-1] + suffix] = (forward_root / ("response" + suffix)).read_bytes()
+                        return ExecResult(return_code=process.returncode, stdout=stdout.decode(), stderr=stderr.decode())
+                if "bash /logs/agent/run.sh" in command:
+                    self.assertEqual(guest_files["/logs/agent/instruction.txt"], b"Write a fractional answer")
+                    self.assertEqual(files[f"{guest_root}/setup.txt"], b"ready")
+                    self.assertNotIn("reference", phases)
+                    phases.append("agent")
+                    files[f"{guest_root}/answer.txt"] = b"0.4"
+                    guest_files["/logs/agent/stdout.txt"] = b"agent executed"
+                return ExecResult(return_code=0, stdout="", stderr="")
+            async def download_logs(source_dir=None, target_dir=None, **kwargs):
+                if str(source_dir) == "/logs/agent":
+                    for path, data in guest_files.items():
+                        if path.startswith("/logs/agent/"):
+                            target = Path(target_dir) / Path(path).name
+                            target.parent.mkdir(parents=True, exist_ok=True)
+                            target.write_bytes(data)
+            linux.exec = AsyncMock(side_effect=execute_linux)
+            linux.upload_file = AsyncMock(side_effect=upload)
+            linux.download_file = AsyncMock(side_effect=download)
+            linux.download_dir_filtered = AsyncMock(side_effect=download_logs)
+            linux.download_dir = AsyncMock(side_effect=download_logs)
 
             with patch("kubevirt_windows.environment.Settings.from_env", return_value=settings if windows else None) as cluster, \
-                    patch("ale_adapter.environment.asyncio.create_subprocess_exec", side_effect=spawn), \
+                    patch("ale_adapter.environment.sbx_configured", return_value=backend_mode == "sbx"), \
+                    patch("ale_adapter.environment.create_backend", return_value=(backend_mode, linux)), \
                     patch.object(KubeVirtWindowsEnvironment, "start", start), \
                     patch.object(KubeVirtWindowsEnvironment, "stop", stop), \
                     patch.dict(os.environ, {"ALE_REFERENCE_ARCHIVE_PASSWORD": "fake-reference-password"}):
@@ -226,7 +256,7 @@ main()
                 self.assertIsNotNone(result.exception_info)
                 self.assertIsNone(result.verifier_result)
                 self.assertEqual(phases, ["setup", "cleanup"] if cancel_setup else ["cleanup"])
-                self.assertTrue((trial / "ale-sandbox.json").is_file())
+                self.assertTrue((trial / "ale-linux.json").is_file())
                 return
             if result.exception_info:
                 logs = "\n".join(p.read_text() for p in trial.glob("ale-*.log"))
@@ -239,5 +269,6 @@ main()
             self.assertLess(phases.index("reference"), phases.index("grade"))
             self.assertEqual(phases[-1], "cleanup")
             if not windows:
+                self.assertEqual(json.loads((trial / "ale-linux.json").read_text())["backend"], backend_mode)
                 self.assertEqual((trial / "agent/stdout.txt").read_text(), "agent executed")
             shutil.rmtree(source)

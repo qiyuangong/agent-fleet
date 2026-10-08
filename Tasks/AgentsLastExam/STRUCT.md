@@ -8,7 +8,8 @@
 | `ale_adapter/adapter.py` | Native Linux/Windows CPU variant discovery and conversion; exclude GPU before imports |
 | `ale_adapter/launch.py` | Validate prepared dataset; replace process with Harbor CLI |
 | `ale_adapter/environment.py` | Harbor guest I/O, Windows PVC delegation and native worker ownership |
-| `ale_adapter/linux_worker.py` | Native QEMU lifecycle and Linux command/file RPC in the separate native interpreter |
+| `ale_adapter/linux.py` | Existing SBX/Docker backend selection and container definition |
+| `ale_adapter/cua_proxy.py`, `guest_http.py` | Native CUA HTTP connection through existing backend command/file APIs |
 | `ale_adapter/native.py` | Unchanged ALE driver/session, staging and setup/evaluation |
 | `ale_adapter/verifier.py` | Native score validation and Harbor rewards |
 | `../../Agents/AgentsLastExam/agent.py` | Mixed-OS image-provided command agent; Windows delegates to the existing bridge |

@@ -164,7 +164,7 @@ Sandbox errors ("path escapes sandbox"): rerun `setup.sh` with
 ## Development
 
 ALE CPU benchmark conversion and prerequisites are documented in
-[AgentsLastExam/README.md](AgentsLastExam/README.md). It uses native QEMU for Linux and the separate
+[AgentsLastExam/README.md](AgentsLastExam/README.md). It prefers the existing SBX/qz backend for Linux with Docker fallback, and the separate
 KubeVirt Windows environment, with the native task driver for both; do not dispatch it through
 the shared Linux runtime installers. Its unit suite uses the pinned Harbor runner:
 `PYTHONPATH=Tasks/AgentsLastExam:Agents/utils/common/Harbor:. python3 -m unittest discover -s Tasks/AgentsLastExam/tests`.

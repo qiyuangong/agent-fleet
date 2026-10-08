@@ -17,13 +17,11 @@ def select_image(native, mapping):
     if profile["image_family"] != native["image_family"]:
         raise ValueError("Mapped ALE image family differs from the native task")
     if native["os"] == "linux":
-        disk = profile.get("qemu", {}).get("disk_source", "")
-        if not disk or "://" in disk or not Path(disk).expanduser().is_absolute():
-            raise ValueError("Linux ALE tasks require a prepared local QEMU disk with an absolute path")
-        path = Path(disk).expanduser()
-        if not path.is_file() or not path.stat().st_size:
-            raise ValueError("Prepared Linux QEMU disk is missing or empty")
-        profile = {**profile, "qemu": {**profile["qemu"], "disk_source": str(path)}}
+        if "qemu" in profile:
+            raise ValueError("ALE Linux uses SBX or Docker; remove the QEMU image mapping")
+        image = profile.get("docker_image", "agentslastexam/ale-ubuntu22-docker:latest")
+        if not isinstance(image, str) or not image or any(char.isspace() for char in image):
+            raise ValueError("Mapped ALE Docker image must be a container image reference")
     return profile
 
 

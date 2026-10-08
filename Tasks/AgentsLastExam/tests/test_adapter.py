@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock, Mock, patch
 from ale_adapter.adapter import discover, materialize
 from ale_adapter.environment import ALEEnvironment
 from ale_adapter.launch import command
+from ale_adapter.linux import create_backend, sbx_configured
 from ale_adapter.source import REVISION, select_image, source_digest, validate_source
 from ale_adapter.verifier import ALEVerifier, score
 from harbor.models.task.config import EnvironmentConfig
@@ -126,16 +127,12 @@ class AdapterTests(unittest.TestCase):
             self.assertIn("exit 1", (task.paths.tests_dir / "test.sh").read_text())
             self.assertEqual(json.loads((root / "output/dataset.json").read_text())["scope"], "cpu")
 
-    def test_linux_mapping_requires_prepared_local_disk(self):
+    def test_linux_mapping_accepts_container_and_rejects_qemu(self):
         native = {**record(os_type="linux"), "image_family": "ale-ubuntu22"}
-        profile = {"image_family": "ale-ubuntu22", "qemu": {"disk_source": "hf://example/disk"}}
-        with self.assertRaisesRegex(ValueError, "local"):
-            select_image(native, {"cpu-free": profile})
-        with tempfile.TemporaryDirectory() as tmp:
-            disk = Path(tmp) / "base.qcow2"
-            disk.write_bytes(b"fixture")
-            profile["qemu"]["disk_source"] = str(disk)
-            self.assertEqual(select_image(native, {"cpu-free": profile}), profile)
+        profile = {"image_family": "ale-ubuntu22", "docker_image": "example/ale:prepared"}
+        self.assertEqual(select_image(native, {"cpu-free": profile}), profile)
+        with self.assertRaisesRegex(ValueError, "QEMU"):
+            select_image(native, {"cpu-free": {**profile, "qemu": {"disk_source": "/data/disk"}}})
 
     def test_source_rejects_wrong_revision_and_fingerprints_helpers(self):
         with patch("ale_adapter.source.subprocess.check_output", return_value="different\n"), \
@@ -160,7 +157,7 @@ class AdapterTests(unittest.TestCase):
         args = argparse.Namespace(dataset=Path("tasks"), source=Path("source"),
                                   native_python=Path("python"), image_map=Path("images.json"),
                                   agent="kubevirt_windows.agent:WindowsCommandAgent",
-                                  task_data_source="baked_in_sandbox",
+                                  task_data_source="baked_in_sandbox", linux_backend="auto",
                                   harbor_args=["--", "--include-task-name", "test--v3", "--max-retries", "2"])
         with patch.dict(os.environ, {"OPIK_URL": "", "HARBOR_CLI_BIN": "/prepared/harbor"}):
             cmd = command(args)
@@ -177,7 +174,7 @@ class AdapterTests(unittest.TestCase):
             python.symlink_to(sys.executable)
             args = argparse.Namespace(dataset=Path("tasks"), source=Path("source"),
                                       native_python=python, image_map=Path("images.json"),
-                                      agent="custom_agent:WindowsAgent", task_data_source="baked_in_sandbox", harbor_args=[])
+                                      agent="custom_agent:WindowsAgent", task_data_source="baked_in_sandbox", linux_backend="auto", harbor_args=[])
             self.assertIn(f"native_python={python}", command(args))
             self.assertEqual(command(args)[command(args).index("--agent") + 1], args.agent)
 
@@ -221,6 +218,118 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
             task_env_config=EnvironmentConfig(os="windows", gpus=int(gpu)),
             source=self.root, native_python=sys.executable, image_map=image_map, **kwargs,
         )
+
+    def linux_environment(self, mode="auto"):
+        directory = self.root / "linux"
+        directory.mkdir(exist_ok=True)
+        native = {**record(os_type="linux"), "snapshot": "cpu-free-ubuntu", "image_family": "ale-ubuntu22"}
+        (directory / "ale.json").write_text(json.dumps(native))
+        image_map = self.root / "linux-images.json"
+        image_map.write_text(json.dumps({"cpu-free-ubuntu": {"image_family": "ale-ubuntu22"}}))
+        return ALEEnvironment(environment_dir=directory, environment_name="ale-linux", session_id="trial",
+            trial_paths=TrialPaths(self.root / "linux-trial"), task_env_config=EnvironmentConfig(os="linux", cpus=8, memory_mb=16384),
+            source=self.root, native_python=sys.executable, image_map=image_map, linux_backend=mode)
+
+    def test_backend_selection_prefers_configured_sbx_and_defaults_to_docker(self):
+        environment = self.linux_environment()
+        profile = environment.spec["profile"]
+        with patch.dict(os.environ, {"SBX_API_KEY": "", "QZ_SANDBOX_API_KEY": "", "E2B_API_KEY": "",
+                                     "QZ_SANDBOX_TEMPLATE": "", "QZ_SANDBOX_TEMPLATE_MAP": ""}):
+            self.assertFalse(sbx_configured(profile))
+            mode, backend = create_backend(environment, profile, "auto", environment.backend_kwargs)
+            self.assertEqual(mode, "docker")
+            self.assertEqual(backend.task_env_config.cpus, 8)
+            self.assertEqual(backend.task_env_config.memory_mb, 16384)
+            compose = json.loads((backend.environment_dir / "docker-compose.yaml").read_text())
+            self.assertEqual(compose["services"]["main"]["entrypoint"], ["/dockerstartup/entrypoint.sh"])
+            with self.assertRaisesRegex(ValueError, "SBX"):
+                create_backend(environment, profile, "sbx", environment.backend_kwargs)
+            with patch.dict(os.environ, {"SBX_API_KEY": "sbx_fake", "QZ_SANDBOX_TEMPLATE": "ale_fixture"}):
+                self.assertTrue(sbx_configured(profile))
+                with patch("qz_e2b_sandbox.QzSandboxEnvironment") as provider:
+                    mode, backend = create_backend(environment, profile, "auto", environment.backend_kwargs)
+                    self.assertEqual(mode, "sbx")
+                    provider.assert_called_once()
+
+    async def test_sbx_provisioning_failure_cleans_up_before_docker_fallback(self):
+        environment = self.linux_environment()
+        sbx, docker = Mock(_sandbox=None), Mock()
+        sbx.start = AsyncMock(side_effect=OSError("service unavailable"))
+        sbx.stop = AsyncMock()
+        docker.start, docker.stop = AsyncMock(), AsyncMock()
+        environment.native_phase = AsyncMock()
+        with patch("ale_adapter.environment.sbx_configured", return_value=True), \
+                patch("ale_adapter.environment.create_backend", side_effect=[("sbx", sbx), ("docker", docker)]) as factory, \
+                patch("ale_adapter.environment.CUAProxy") as proxy:
+            proxy.return_value.start = AsyncMock(return_value="http://127.0.0.1:5000/token")
+            proxy.return_value.stop = AsyncMock()
+            await environment.start()
+            sbx.stop.assert_awaited_once_with(delete=True)
+            docker.start.assert_awaited_once_with(force_build=False)
+            self.assertEqual(factory.call_args.args[2], "docker")
+            environment.native_phase.assert_awaited_once_with("setup")
+            self.assertEqual(json.loads((environment.trial_paths.trial_dir / "ale-linux.json").read_text())["backend"], "docker")
+            await environment.stop()
+            docker.stop.assert_awaited_once_with(delete=True)
+
+    async def test_sbx_missing_sdk_falls_back_without_installing_dependencies(self):
+        environment = self.linux_environment()
+        docker = Mock(start=AsyncMock(), stop=AsyncMock())
+        environment.native_phase = AsyncMock()
+        with patch("ale_adapter.environment.sbx_configured", return_value=True), \
+                patch("ale_adapter.environment.create_backend", side_effect=[ImportError("missing SDK"), ("docker", docker)]) as factory, \
+                patch("ale_adapter.environment.CUAProxy") as proxy:
+            proxy.return_value.start = AsyncMock(return_value="http://127.0.0.1:5000")
+            proxy.return_value.stop = AsyncMock()
+            await environment.start()
+            self.assertEqual(factory.call_count, 2)
+            self.assertEqual(factory.call_args.args[2], "docker")
+            await environment.stop()
+
+    async def test_failed_sbx_cleanup_prevents_allocating_docker(self):
+        environment = self.linux_environment()
+        sbx = Mock(_sandbox=Mock(sandbox_id="fixture"),
+            start=AsyncMock(side_effect=OSError("unavailable")), stop=AsyncMock(),
+            _stop_sandbox=AsyncMock(side_effect=RuntimeError("delete failed")))
+        with patch("ale_adapter.environment.sbx_configured", return_value=True), \
+                patch("ale_adapter.environment.create_backend", return_value=("sbx", sbx)) as factory, \
+                self.assertRaisesRegex(RuntimeError, "delete failed"):
+            await environment.start()
+        factory.assert_called_once()
+        sbx._stop_sandbox.assert_awaited_once()
+
+    async def test_explicit_sbx_failure_never_falls_back(self):
+        environment = self.linux_environment("sbx")
+        sbx = Mock(start=AsyncMock(side_effect=OSError("unavailable")), stop=AsyncMock())
+        with patch("ale_adapter.environment.create_backend", return_value=("sbx", sbx)) as factory, \
+                self.assertRaises(OSError):
+            await environment.start()
+        factory.assert_called_once()
+        sbx.stop.assert_awaited_once_with(delete=True)
+
+    async def test_sbx_cancellation_cleans_up_without_fallback(self):
+        environment = self.linux_environment()
+        sbx = Mock(start=AsyncMock(side_effect=asyncio.CancelledError()), stop=AsyncMock())
+        with patch("ale_adapter.environment.sbx_configured", return_value=True), \
+                patch("ale_adapter.environment.create_backend", return_value=("sbx", sbx)) as factory, \
+                self.assertRaises(asyncio.CancelledError):
+            await environment.start()
+        factory.assert_called_once()
+        sbx.stop.assert_awaited_once_with(delete=True)
+
+    async def test_native_setup_failure_does_not_retry_in_another_backend(self):
+        environment = self.linux_environment()
+        sbx = Mock(start=AsyncMock(), stop=AsyncMock())
+        environment.native_phase = AsyncMock(side_effect=RuntimeError("native setup failed"))
+        with patch("ale_adapter.environment.sbx_configured", return_value=True), \
+                patch("ale_adapter.environment.create_backend", return_value=("sbx", sbx)) as factory, \
+                patch("ale_adapter.environment.CUAProxy") as proxy:
+            proxy.return_value.start = AsyncMock(return_value="http://127.0.0.1:5000/token")
+            proxy.return_value.stop = AsyncMock()
+            with self.assertRaisesRegex(RuntimeError, "native setup failed"):
+                await environment.start()
+        factory.assert_called_once()
+        sbx.stop.assert_awaited_once_with(delete=True)
 
     def test_per_trial_image_selection_and_gpu_exclusion(self):
         cpu = self.environment()

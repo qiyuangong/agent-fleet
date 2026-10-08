@@ -23,7 +23,8 @@ def command(args):
             "--ek", f"source={args.source.resolve()}",
             "--ek", f"native_python={args.native_python.absolute()}",
             "--ek", f"image_map={args.image_map.resolve()}",
-            "--ek", f"task_data_source={args.task_data_source}"]
+            "--ek", f"task_data_source={args.task_data_source}",
+            "--ek", f"linux_backend={args.linux_backend}"]
     return cmd + (args.harbor_args[1:] if args.harbor_args[:1] == ["--"] else args.harbor_args)
 
 
@@ -35,6 +36,7 @@ def main():
     parser.add_argument("--image-map", type=Path, required=True)
     parser.add_argument("--agent", default="Agents.AgentsLastExam.agent:ALECommandAgent")
     parser.add_argument("--task-data-source", default="baked_in_sandbox")
+    parser.add_argument("--linux-backend", choices=("auto", "sbx", "docker"), default="auto")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("harbor_args", nargs=argparse.REMAINDER)
     args = parser.parse_args()

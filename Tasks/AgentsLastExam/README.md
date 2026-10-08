@@ -8,8 +8,8 @@ modules. Native task prompts, setup and graders remain unchanged. Generated
 tasks stay outside this repository.
 
 Harbor owns concurrency, trials, timeouts, retries, resume and result reporting.
-`ALEEnvironment` provisions a fresh full-OS guest per trial: ALE's native QEMU
-provider for Ubuntu and a KubeVirt PVC clone for Windows. ALE's `TaskDriver`
+`ALEEnvironment` provisions a fresh sandbox per trial: the existing SBX (qz) sandbox
+provider by default, with Docker fallback for Ubuntu and a KubeVirt PVC clone for Windows. ALE's `TaskDriver`
 sets up and grades the same guest that the Harbor agent uses. `ALEVerifier`
 stages references only after agent execution, preserves zero, fractional and
 negative scores, and saves the native result. Missing scores and grader failures
@@ -40,24 +40,41 @@ Startup never installs host dependencies.
 
 ## Guest images and task data
 
-For Linux, prepare the official `ale-ubuntu22.qcow2` disk following
-[ALE's QEMU guide](https://github.com/rdi-berkeley/agents-last-exam/blob/d9abc0734b56ea34116c5bfcbdd0b808269ab9e2/docs/local-qemu.md).
-The published logical disk is `hf://agents-last-exam/ale-images-qcow2/ale-ubuntu22.qcow2`;
-ALE supports reconstructing its multipart download. Download/cache it during
-preparation and supply its absolute local path below. A Linux host with Docker,
-`/dev/kvm`, sufficient disk and task-card CPU/RAM is required. Pull the QEMU
-runner during preparation:
+For Linux, use a prepared ALE Ubuntu container image with native task software,
+input data and encrypted references. The upstream image is
+`agentslastexam/ale-ubuntu22-docker:latest`, exported from the native Ubuntu
+image with the same `/media/user/data/agenthle` and `/opt/ale-run/.venv` paths.
+Supply an immutable prepared tag/digest for repeatable runs.
 
-```bash
-docker pull agentslastexam/ale-qemu:0.2.0
-```
+The default `--linux-backend auto` prefers the repository's existing
+[SBX/qz provider](../../Agents/utils/common/Harbor/QZ_SANDBOX_README.md).
+Configure `SBX_API_KEY` (or `QZ_SANDBOX_API_KEY`) and a prepared ALE template,
+using `sbx_template` in the image map or `QZ_SANDBOX_TEMPLATE` /
+`QZ_SANDBOX_TEMPLATE_MAP`. Templates must contain the native task software/data
+and a running CUA server on port 5000. A profile may supply `startup_command`
+to start prepared guest services. Template CPU/RAM must satisfy task requirements;
+SBX uses its registered compute spec and cannot enforce per-task resource limits.
 
-The native provider mounts the base disk read-only and creates a disposable
-qcow2 overlay per trial. A full guest OS supports the Linux tasks that use nested
-Docker or Apptainer/Singularity. Preserve `/media/user/data/agenthle`, native
-Python and CUA services. The guest account must have passwordless sudo to create
-Harbor's `/logs` directories. Launch requires a prepared local disk; runner
-pulling defaults to `never`.
+If SBX is unconfigured or sandbox provisioning fails, auto mode cleans up the
+SBX attempt and uses Harbor's existing Docker environment. `--linux-backend sbx`
+requires SBX and never falls back; `--linux-backend docker` forces Docker. Once
+native setup starts, setup/agent/grader failures remain trial errors and never
+trigger backend switching. Provisioning cancellation also never triggers fallback.
+
+Docker requires the usual Docker/Compose host setup. It boots the prepared
+container with ALE's `/dockerstartup/entrypoint.sh`, preserving its desktop and
+CUA services. There is no QEMU, qcow2 disk, or `/dev/kvm` requirement. CPU/memory
+limits follow the Harbor task configuration. Native setup/grading reach CUA
+through a per-trial loopback HTTP proxy using the backend's existing command/file
+APIs; no guest port needs to be exposed externally.
+
+All Linux tasks remain included, including nested Docker and Apptainer/Singularity
+tasks. Prepare an image/template with those runtimes and the required permissions.
+For a Docker host that supports them, set `docker.privileged: true` and
+`docker.enable_dind: true` to start ALE's baked inner Docker daemon. An image
+containing the required nested workloads/GUI bundles is still necessary. The
+adapter never skips tasks because their runtime is missing; native failures are
+reported as trial errors.
 
 For Windows, import the official ALE CPU images as golden PVCs following the
 [Windows backend guide](../../Agents/utils/common/Harbor/KUBEVIRT_WINDOWS_README.md).
@@ -69,12 +86,9 @@ Create an operator-owned image map, for example `/data/ale-images.json`:
 {
   "cpu-free-ubuntu": {
     "image_family": "ale-ubuntu22",
-    "qemu": {
-      "disk_source": "/data/ale/ale-ubuntu22.qcow2",
-      "root": "/data/ale/qemu",
-      "runner_image": "agentslastexam/ale-qemu:0.2.0",
-      "runner_pull_policy": "never"
-    }
+    "sbx_template": "ale_ubuntu22_prepared",
+    "docker_image": "your-registry/ale-ubuntu22:prepared",
+    "docker": {"privileged": true, "enable_dind": true}
   },
   "cpu-free": {"pvc": "ale-cpu-free", "image_family": "ale-win10"},
   "cpu-license": {"pvc": "ale-cpu-license", "image_family": "ale-win10"}
@@ -106,6 +120,7 @@ Linux entrypoints run in bash and write logs under `/logs/agent`; Windows logs
 use `C:/logs/agent`.
 
 ```bash
+export SBX_API_KEY='sbx_your-private-key'
 export HARBOR_ALE_LINUX_AGENT_COMMAND='/opt/agent/run-agent.sh'
 export HARBOR_KUBEVIRT_IMAGE=ale-cpu-free
 export HARBOR_WINDOWS_AGENT_COMMAND='C:\Agent\run-agent.cmd'
@@ -139,13 +154,13 @@ all image mappings and provenance, prints counts by OS, and starts no guests.
 Forwarded CLI options can contain credentials and are never printed.
 
 Results use normal Harbor job/trial artifacts plus `verifier/native-result.json`.
-Windows phases write `ale-setup.log` and `ale-evaluate.log`; Linux's persistent
-native worker writes `ale-linux.log`. Resume with native `harbor jobs resume
+Both OSes write `ale-setup.log` and `ale-evaluate.log`; `ale-linux.json` records
+the selected Linux backend. Resume with native `harbor jobs resume
 --job-path ./runs/ale-cpu` and the same configuration and
 `PYTHONPATH=.:Tasks/AgentsLastExam:Agents/utils/common/Harbor`.
 Cancellation stops native phases before guest cleanup. Hard termination may
-leave resources: inspect `kubevirt.json` for Windows and `ale-sandbox.json` for
-Linux, including its native container/overlay ownership metadata.
+leave resources: inspect `kubevirt.json` for Windows and `ale-linux.json` for
+Linux. Inspect Docker's Harbor project or the SBX sandbox using its backend logs.
 
 ## Checks
 
@@ -159,5 +174,5 @@ ALE_TEST_SOURCE=/path/to/pinned/ale ALE_TEST_PYTHON=/path/to/native-env/bin/pyth
 ```
 
 Portable and loopback tests do not establish live benchmark parity. A complete
-run needs the prepared Ubuntu disk, Windows CPU/licensed images, native task
+run needs a prepared ALE SBX template or Docker image, Windows CPU/licensed images, native task
 data, judge credentials and agent entrypoints. These are operator-provided assets.

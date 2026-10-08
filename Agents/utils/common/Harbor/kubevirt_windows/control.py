@@ -91,6 +91,8 @@ class Settings:
     transfer_timeout: int = 300
     guest_protocol: str = "waa"
     extra_guest_ports: tuple[int, ...] = ()
+    # Optional device-plugin resource selected by a consuming task adapter.
+    gpu_device: str = ""
 
     @property
     def guest_port(self):
@@ -314,6 +316,12 @@ def build_create_request(
     root_disk = {"disk": {"bus": disk_bus}, "name": "disk0"}
     cloudinit_disk = {"disk": {"bus": "virtio"}, "name": "cloudinit"}
     spec["domain"]["devices"]["disks"] = [root_disk, cloudinit_disk]
+    if settings.gpu_device:
+        if not re.fullmatch(r"[a-z0-9][a-z0-9.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*", settings.gpu_device):
+            raise ValueError("GPU device must be a qualified Kubernetes resource name")
+        spec["domain"]["devices"]["gpus"] = [
+            {"name": "gpu0", "deviceName": settings.gpu_device}
+        ]
     if settings.node:
         spec["nodeSelector"] = {"kubernetes.io/hostname": settings.node}
 

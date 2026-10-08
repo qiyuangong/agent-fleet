@@ -15,6 +15,7 @@ fleet from `Agents/Openclaw/` (see
 | `SWE-rebench-v2/` | Official SWE-rebench-V2 native Harbor task generator |
 | `SWE-rebench-v2-TaskTrove/` | Third-party TaskTrove Harbor registry integration |
 | `TMax/` | Harbor registry dataset entrypoint |
+| `AgentsLastExam/` | Native ALE Windows task variants, setup/evaluation and Harbor launcher |
 | `BrowseComp/`, `DeepSearchQA/` | Native Harbor dataset entrypoints; automatic preparation and optional manual adapters share `Agents/utils/web_search/` |
 | `Pinchbench/` | PinchBench runner for the OpenClaw fleet |
 | `clawBio/` | ClawBio bioinformatics benchmark for the OpenClaw fleet |
@@ -161,6 +162,12 @@ Sandbox errors ("path escapes sandbox"): rerun `setup.sh` with
 `WORKSPACE_ONLY=false`.
 
 ## Development
+
+ALE Windows benchmark conversion and prerequisites are documented in
+[AgentsLastExam/README.md](AgentsLastExam/README.md). It uses the separate
+KubeVirt Windows environment and native task driver; do not dispatch it through
+the shared Linux runtime installers. Its unit suite uses the pinned Harbor runner:
+`PYTHONPATH=Tasks/AgentsLastExam:Agents/utils/common/Harbor:. python3 -m unittest discover -s Tasks/AgentsLastExam/tests`.
 
 WindowsAgentArena uses its own host environment and pinned native upstream clients.
 Run `WindowsAgentArena/setup.sh` explicitly; startup must only validate it.

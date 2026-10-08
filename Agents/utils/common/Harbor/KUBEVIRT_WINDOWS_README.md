@@ -96,6 +96,12 @@ transport to `node_ip:node_port`.
 
 ## ALE Windows guest contract
 
+The native ALE Windows benchmark adapter is in
+[Tasks/AgentsLastExam](../../../../Tasks/AgentsLastExam/README.md). It converts
+all Windows task variants and retains native setup, reference staging and
+grading through Harbor. Its image map can select a permitted GPU resource per
+snapshot; the VM request uses KubeVirt's `devices.gpus` assignment.
+
 Set `HARBOR_KUBEVIRT_GUEST_PROTOCOL=ale` for an imported ALE Windows image.
 The source PVC must include the applications and task data expected by the
 selected Windows tasks. Preserve the CUA server's startup and interactive

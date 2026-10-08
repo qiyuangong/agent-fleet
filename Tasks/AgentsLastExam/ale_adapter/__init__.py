@@ -1,1 +1,1 @@
-"""Agents' Last Exam Windows tasks for Harbor."""
+"""Agents' Last Exam Linux and Windows CPU tasks for Harbor."""

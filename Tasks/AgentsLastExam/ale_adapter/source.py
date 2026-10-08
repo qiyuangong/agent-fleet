@@ -9,13 +9,21 @@ REVISION = "d9abc0734b56ea34116c5bfcbdd0b808269ab9e2"
 
 
 def select_image(native, mapping):
+    if native["requires_gpu"]:
+        raise ValueError("GPU ALE tasks are excluded")
     profile = mapping[native["snapshot"]]
-    if not isinstance(profile.get("pvc"), str) or not profile["pvc"]:
+    if native["os"] == "windows" and (not isinstance(profile.get("pvc"), str) or not profile["pvc"]):
         raise ValueError("Mapped ALE image requires a golden PVC name")
     if profile["image_family"] != native["image_family"]:
         raise ValueError("Mapped ALE image family differs from the native task")
-    if native["requires_gpu"] and not profile.get("gpu_device"):
-        raise ValueError("GPU ALE tasks require a KubeVirt GPU device resource")
+    if native["os"] == "linux":
+        disk = profile.get("qemu", {}).get("disk_source", "")
+        if not disk or "://" in disk or not Path(disk).expanduser().is_absolute():
+            raise ValueError("Linux ALE tasks require a prepared local QEMU disk with an absolute path")
+        path = Path(disk).expanduser()
+        if not path.is_file() or not path.stat().st_size:
+            raise ValueError("Prepared Linux QEMU disk is missing or empty")
+        profile = {**profile, "qemu": {**profile["qemu"], "disk_source": str(path)}}
     return profile
 
 

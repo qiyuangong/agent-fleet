@@ -1,4 +1,4 @@
-"""Portable checks of conversion, Harbor lifecycle, GPU isolation and scores."""
+"""Portable checks of conversion, Harbor lifecycle, CPU scope and scores."""
 
 import argparse
 import asyncio
@@ -8,9 +8,10 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
-from ale_adapter.adapter import materialize
+from ale_adapter.adapter import discover, materialize
 from ale_adapter.environment import ALEEnvironment
 from ale_adapter.launch import command
 from ale_adapter.source import REVISION, select_image, source_digest, validate_source
@@ -18,12 +19,12 @@ from ale_adapter.verifier import ALEVerifier, score
 from harbor.models.task.config import EnvironmentConfig
 from harbor.models.task.task import Task
 from harbor.models.trial.paths import TrialPaths
-from kubevirt_windows.control import Cluster, Settings, build_create_request
+from kubevirt_windows.control import Cluster, Settings
 from kubevirt_windows.environment import KubeVirtWindowsEnvironment
 
 
-def record(gpu=False):
-    return {"task": "tasks/visual_media/example", "variant": 3,
+def record(gpu=False, os_type="windows"):
+    return {"task": "tasks/visual_media/example", "variant": 3, "os": os_type,
             "description": "Solve the task using E:\\agenthle.\nKeep Unicode: 中文",
             "snapshot": "gpu-free" if gpu else "cpu-free", "image_family": "ale-win10",
             "resolution": [1024, 768], "requires_gpu": gpu,
@@ -36,7 +37,7 @@ class AdapterTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             with patch("ale_adapter.adapter.validate_source", return_value=root), \
-                    patch("ale_adapter.adapter.discover", return_value=[record(True)]), \
+                    patch("ale_adapter.adapter.discover", return_value=[record()]), \
                     patch("ale_adapter.adapter.source_digest", return_value="fixture-source"):
                 before = list(sys.path)
                 try:
@@ -46,7 +47,7 @@ class AdapterTests(unittest.TestCase):
             task = Task(root / "output/visual_media--example--v3")
             self.assertEqual(task.instruction, record()["description"] + "\n")
             self.assertEqual(task.config.environment.os.value, "windows")
-            self.assertEqual(task.config.environment.gpus, 1)
+            self.assertEqual(task.config.environment.gpus, 0)
             self.assertEqual(task.config.environment.cpus, 8)
             self.assertEqual(task.config.environment.memory_mb, 16384)
             self.assertEqual(task.config.agent.timeout_sec, 7200)
@@ -54,6 +55,41 @@ class AdapterTests(unittest.TestCase):
             native = json.loads((task.paths.environment_dir / "ale.json").read_text())
             self.assertEqual(native["variant"], 3)
             self.assertEqual(native["revision"], REVISION)
+
+    def test_discovery_includes_both_cpu_oses_and_skips_gpu_before_import(self):
+        loaded = []
+        class Loader:
+            def __init__(self, path):
+                self.os = "linux" if path.endswith("linux") else "windows"
+                loaded.append(Path(path).name)
+                if path.endswith("gpu"):
+                    raise AssertionError("GPU implementation must never be imported")
+            def _load_module(self):
+                return SimpleNamespace(load=lambda: [None, None])
+            def get_evaluate_fn(self):
+                return lambda: None
+            def load(self, variant_index):
+                return {"os_type": self.os, "description": f"Variant {variant_index}"}
+        modules = {
+            "ale_run.environments.images": SimpleNamespace(get=lambda name: SimpleNamespace(os=name)),
+            "ale_run.environments.providers.gcloud": SimpleNamespace(_parse_gce_machine_type=lambda value: None),
+            "ale_run.tasks.loader": SimpleNamespace(TaskLoader=Loader),
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "configs/environments").mkdir(parents=True)
+            (root / "configs/environments/environment_gcloud.yaml").write_text(
+                "snapshots:\n  cpu-linux: {image: linux}\n  cpu-win: {image: windows}\n"
+                "  gpu-win: {image: windows, gcloud: {gpu: {count: 1}}}\n")
+            for name, snapshot in [("linux", "cpu-linux"), ("windows", "cpu-win"), ("gpu", "gpu-win")]:
+                card = root / "tasks/fixture" / name / "task_card.json"
+                card.parent.mkdir(parents=True)
+                card.write_text(json.dumps({"vm": {"snapshot": snapshot}}))
+            with patch.dict(sys.modules, modules):
+                records = discover(root)
+        self.assertEqual(set(loaded), {"linux", "windows"})
+        self.assertEqual([item["os"] for item in records], ["linux", "linux", "windows", "windows"])
+        self.assertTrue(all(not item["requires_gpu"] for item in records))
 
     def test_conversion_does_not_publish_partial_dataset(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -71,6 +107,35 @@ class AdapterTests(unittest.TestCase):
                 sys.path[:] = before
             self.assertFalse((root / "output").exists())
             self.assertEqual(list(root.iterdir()), [])
+
+    def test_linux_conversion_preserves_os_and_fails_closed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            native = {**record(os_type="linux"), "snapshot": "cpu-free-ubuntu", "image_family": "ale-ubuntu22"}
+            with patch("ale_adapter.adapter.validate_source", return_value=root), \
+                    patch("ale_adapter.adapter.discover", return_value=[native]), \
+                    patch("ale_adapter.adapter.source_digest", return_value="fixture-source"):
+                before = list(sys.path)
+                try:
+                    materialize(root, root / "output")
+                finally:
+                    sys.path[:] = before
+            task = Task(root / "output/visual_media--example--v3")
+            self.assertEqual(task.config.environment.os.value, "linux")
+            self.assertEqual(task.config.environment.gpus, 0)
+            self.assertIn("exit 1", (task.paths.tests_dir / "test.sh").read_text())
+            self.assertEqual(json.loads((root / "output/dataset.json").read_text())["scope"], "cpu")
+
+    def test_linux_mapping_requires_prepared_local_disk(self):
+        native = {**record(os_type="linux"), "image_family": "ale-ubuntu22"}
+        profile = {"image_family": "ale-ubuntu22", "qemu": {"disk_source": "hf://example/disk"}}
+        with self.assertRaisesRegex(ValueError, "local"):
+            select_image(native, {"cpu-free": profile})
+        with tempfile.TemporaryDirectory() as tmp:
+            disk = Path(tmp) / "base.qcow2"
+            disk.write_bytes(b"fixture")
+            profile["qemu"]["disk_source"] = str(disk)
+            self.assertEqual(select_image(native, {"cpu-free": profile}), profile)
 
     def test_source_rejects_wrong_revision_and_fingerprints_helpers(self):
         with patch("ale_adapter.source.subprocess.check_output", return_value="different\n"), \
@@ -157,16 +222,12 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
             source=self.root, native_python=sys.executable, image_map=image_map, **kwargs,
         )
 
-    def test_per_trial_images_and_gpu_request_are_isolated(self):
-        cpu, gpu = self.environment(), self.environment(True)
-        self.assertEqual(cpu.settings.image, "cpu-pvc")
-        self.assertEqual(gpu.settings.image, "gpu-pvc")
+    def test_per_trial_image_selection_and_gpu_exclusion(self):
+        cpu = self.environment()
+        self.assertEqual(cpu.backend.settings.image, "cpu-pvc")
         self.assertEqual(self.settings.image, "default-pvc")
-        body = build_create_request(gpu.settings, "hf-win-test")
-        self.assertEqual(body["spec"]["template"]["spec"]["domain"]["devices"]["gpus"],
-                         [{"name": "gpu0", "deviceName": "nvidia.com/test-gpu"}])
-        cpu_body = build_create_request(cpu.settings, "hf-win-test")
-        self.assertNotIn("gpus", cpu_body["spec"]["template"]["spec"]["domain"]["devices"])
+        with self.assertRaises(ValueError):
+            self.environment(True)
 
     def test_rejects_unimplemented_data_backend(self):
         with self.assertRaisesRegex(ValueError, "staging"):
@@ -175,8 +236,8 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
     async def test_native_setup_precedes_agent_and_failure_cleans_vm(self):
         environment = self.environment()
         async def started(*args, **kwargs):
-            environment._started = True
-            environment.transport = Mock(client=Mock(base_url="http://127.0.0.1:5000/"))
+            environment.backend._started = True
+            environment.backend.transport = Mock(client=Mock(base_url="http://127.0.0.1:5000/"))
         with patch.object(KubeVirtWindowsEnvironment, "start", side_effect=started), \
                 patch.object(KubeVirtWindowsEnvironment, "stop", new_callable=AsyncMock) as stop:
             environment.native_phase = AsyncMock(side_effect=RuntimeError("setup failed"))
@@ -197,13 +258,22 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
         environment.native_phase.assert_awaited_once_with("evaluate", verifier_env={"JUDGE_KEY": "fake"})
         self.assertEqual(environment.trial_paths.reward_text_path.read_text(), "0.0\n")
 
+    async def test_windows_delegation_preserves_harbor_user_and_scoped_env(self):
+        environment = self.environment()
+        environment.default_user = "other-user"
+        environment.backend.exec = AsyncMock(return_value=Mock(stdout="", stderr="", return_code=0))
+        with environment.scoped_exec_env({"HARBOR_MODEL": "fake-model"}):
+            await environment.exec("echo hello")
+        self.assertEqual(environment.backend.exec.call_args.kwargs["user"], "other-user")
+        self.assertEqual(environment.backend.exec.call_args.kwargs["env"]["HARBOR_MODEL"], "fake-model")
+
     async def test_cancelled_phase_terminates_worker_before_vm_cleanup(self):
         environment = self.environment()
         environment._started, environment.transport = True, Mock()
         environment.trial_paths.trial_dir.mkdir()
         environment.spec = {}
-        worker = Mock(pid=12345)
-        worker.wait = AsyncMock(side_effect=[asyncio.CancelledError(), 0])
+        worker = Mock(pid=12345, returncode=None)
+        worker.wait = AsyncMock(side_effect=[asyncio.CancelledError(), 0, 0])
         with patch("ale_adapter.environment.asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=worker), \
                 patch("ale_adapter.environment.os.killpg") as kill:
             with self.assertRaises(asyncio.CancelledError):

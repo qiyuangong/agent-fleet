@@ -12,7 +12,7 @@ from urllib.parse import urlparse
 from .source import REVISION, source_digest, validate_source
 
 
-async def run(spec, phase):
+async def run(spec, phase, sandbox=None):
     source = validate_source(spec["source"])
     if spec["revision"] != REVISION or source_digest(source) != spec["source_sha256"]:
         raise ValueError("ALE source changed since task conversion")
@@ -29,16 +29,16 @@ async def run(spec, phase):
     from ale_run.tasks.driver import TaskDriver
 
     image = get_image(spec["image_family"])
-    sandbox = SandboxHandle(id=spec["vm"], endpoint=spec["endpoint"], os="windows", **image.sandbox_paths())
+    sandbox = sandbox or SandboxHandle(id=spec["vm"], endpoint=spec["endpoint"], os=spec["os"], **image.sandbox_paths())
     session = StaticProvider({"endpoint": spec["endpoint"], "image": image.name}).open_session(sandbox)
-    driver = TaskDriver(str(source / spec["task"]), session, variant=spec["variant"], os_type="windows")
-    if driver.task_info["os_type"] != "windows":
-        raise ValueError("ALE adapter only supports Windows tasks")
+    driver = TaskDriver(str(source / spec["task"]), session, variant=spec["variant"], os_type=spec["os"])
+    if driver.task_info["os_type"] != spec["os"]:
+        raise ValueError("Native ALE task OS differs from its Harbor environment")
     data = driver.task_info["task_data"]
     backend = select(spec["task_data_source"])
     try:
         if phase == "setup":
-            if spec.get("resolution"):
+            if spec["os"] == "windows" and spec.get("resolution"):
                 # Reuse ALE's Windows API implementation and reject unsupported modes.
                 import base64
 

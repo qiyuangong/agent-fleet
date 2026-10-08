@@ -94,7 +94,7 @@ and optionally set `HARBOR_KUBEVIRT_GUEST_PORT` (default 5000).
 ALE support covers Windows tasks; SSH/WinRM and other benchmark images are
 outside this backend. Agents can be
 image-provided or provisioned with the optional pinned local preparation
-manifest. The native ALE Windows benchmark adapter and launch commands
+manifest. The native ALE Linux/Windows CPU benchmark adapter and launch commands
 live in [Tasks/AgentsLastExam](../Tasks/AgentsLastExam/README.md).
 Do not route Windows runs through the Linux runtime installers.
 

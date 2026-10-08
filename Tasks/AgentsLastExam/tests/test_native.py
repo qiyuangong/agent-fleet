@@ -4,6 +4,7 @@ import asyncio
 import base64
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -25,7 +26,19 @@ PYTHON = os.environ.get("ALE_TEST_PYTHON")
 
 @unittest.skipUnless(SOURCE and PYTHON, "Prepare the pinned native ALE source and Python environment")
 class NativeTrialTests(unittest.IsolatedAsyncioTestCase):
-    async def test_native_setup_reference_timing_grading_and_harbor_reporting(self):
+    async def test_windows_native_trial(self):
+        await self.native_trial("windows")
+
+    async def test_linux_native_trial(self):
+        await self.native_trial("linux")
+
+    async def test_linux_setup_failure_releases_vm(self):
+        await self.native_trial("linux", fail_setup=True)
+
+    async def test_linux_setup_timeout_releases_vm(self):
+        await self.native_trial("linux", cancel_setup=True)
+
+    async def native_trial(self, os_type, fail_setup=False, cancel_setup=False):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             source = root / "source"
@@ -36,36 +49,49 @@ class NativeTrialTests(unittest.IsolatedAsyncioTestCase):
                                     ["git", "-C", str(source), "checkout", "--quiet", "--detach", REVISION], check=True)
             fixture = source / "tasks/fixture/roundtrip"
             fixture.mkdir(parents=True)
-            (fixture / "main.py").write_text('''
+            windows = os_type == "windows"
+            guest_root = "C:/fixture" if windows else "/home/user/fixture"
+            reference = ("E:/agenthle" if windows else "/media/user/data/agenthle") + "/fixture/roundtrip/base/reference/expected.txt"
+            config_import = "tasks.common_config import GeneralTaskConfig" if windows else "tasks.linux_runtime import LinuxTaskConfig as GeneralTaskConfig"
+            (fixture / "main.py").write_text(f'''
+import asyncio
 import cua_bench as cb
-from tasks.common_config import GeneralTaskConfig
+from {config_import}
 config = GeneralTaskConfig(DOMAIN_NAME="fixture", TASK_NAME="roundtrip", VARIANT_NAME="base")
 def load():
     return [cb.Task(description="Write a fractional answer", metadata=config.to_metadata(),
-                    computer={"setup_config": {"os_type": "windows"}})]
+                    computer={{"setup_config": {{"os_type": "{os_type}"}}}})]
 async def start(task, session):
-    await session.write_bytes("C:/fixture/setup.txt", b"ready")
+    {"raise RuntimeError('fixture setup failed')" if fail_setup else "pass"}
+    await session.write_bytes("{guest_root}/setup.txt", b"ready")
+    {"await asyncio.sleep(3600)" if cancel_setup else "pass"}
 async def evaluate(task, session):
-    assert await session.read_bytes("C:/fixture/setup.txt") == b"ready"
-    assert await session.read_bytes("E:/agenthle/fixture/roundtrip/base/reference/expected.txt") == b"reference"
-    return [float(await session.read_bytes("C:/fixture/answer.txt")), 0.9]
+    assert await session.read_bytes("{guest_root}/setup.txt") == b"ready"
+    assert await session.read_bytes("{reference}") == b"reference"
+    return [float(await session.read_bytes("{guest_root}/answer.txt")), 0.9]
 ''')
-            (fixture / "task_card.json").write_text(json.dumps({"vm": {"snapshot": "cpu-free", "timeout": 7200}}))
+            (fixture / "task_card.json").write_text(json.dumps({"vm": {"snapshot": "cpu-free" if windows else "cpu-free-ubuntu", "timeout": 7200}}))
             task = root / "task"
             (task / "environment").mkdir(parents=True)
             (task / "tests").mkdir()
             (task / "instruction.md").write_text("Write a fractional answer")
             (task / "task.toml").write_text(
-                '[environment]\nos="windows"\ncpus=4\nmemory_mb=16384\n'
+                f'[environment]\nos="{os_type}"\ncpus=4\nmemory_mb=16384\nbuild_timeout_sec={10 if cancel_setup else 60}\n'
                 '[agent]\ntimeout_sec=60\n[verifier]\ntimeout_sec=60\n'
             )
             (task / "tests/test.bat").write_bytes(b"@echo off\r\nexit /b 1\r\n")
-            native = {"task": "tasks/fixture/roundtrip", "variant": 0,
-                      "snapshot": "cpu-free", "image_family": "ale-win10", "requires_gpu": False,
+            (task / "tests/test.sh").write_text("#!/usr/bin/env bash\nset -euo pipefail\nexit 1\n")
+            native = {"task": "tasks/fixture/roundtrip", "variant": 0, "os": os_type, "cpus": 4, "memory_mb": 16384,
+                      "snapshot": "cpu-free" if windows else "cpu-free-ubuntu",
+                      "image_family": "ale-win10" if windows else "ale-ubuntu22", "requires_gpu": False,
                       "resolution": [1024, 768], "revision": REVISION, "source_sha256": source_digest(source)}
             (task / "environment/ale.json").write_text(json.dumps(native))
             mapping = root / "images.json"
-            mapping.write_text(json.dumps({"cpu-free": {"pvc": "ale-cpu-free", "image_family": "ale-win10"}}))
+            disk = root / "base.qcow2"
+            disk.write_bytes(b"fixture disk")
+            mapping.write_text(json.dumps({
+                "cpu-free": {"pvc": "ale-cpu-free", "image_family": "ale-win10"},
+                "cpu-free-ubuntu": {"image_family": "ale-ubuntu22", "qemu": {"disk_source": str(disk)}}}))
             files, phases = {}, []
 
             class Handler(BaseHTTPRequestHandler):
@@ -84,17 +110,38 @@ async def evaluate(task, session):
                             result["stdout"] = "set_ok"
                         elif "7z x" in command:
                             phases.append("reference")
-                            files["E:/agenthle/fixture/roundtrip/base/reference/expected.txt"] = b"reference"
+                            files[reference] = b"reference"
+                        elif command.startswith("base64 -d "):
+                            parts = shlex.split(command)
+                            files[parts[4]] = base64.b64decode(files[parts[2]])
+                        elif "find . -mindepth" in command:
+                            directory = "/logs/agent/"
+                            result["stdout"] = "\n".join(f"{path.removeprefix(directory)}\tf\t{len(data)}"
+                                for path, data in files.items() if path.startswith(directory) and "'/logs/agent'" in command)
+                        elif "bash /logs/agent/run.sh" in command:
+                            assert files["/logs/agent/instruction.txt"] == b"Write a fractional answer"
+                            assert files[f"{guest_root}/setup.txt"] == b"ready"
+                            assert "reference" not in phases
+                            phases.append("agent")
+                            files[f"{guest_root}/answer.txt"] = b"0.4"
+                            files["/logs/agent/stdout.txt"] = b"agent executed"
+                            files["/logs/agent/stderr.txt"] = b""
+                        elif command == "fixture-release":
+                            phases.append("cleanup")
                         elif "pyvenv.cfg" in command:
                             result["return_code"] = 1
                     elif method == "write_bytes":
                         files[params["path"]] = base64.b64decode(params["content_b64"])
-                        phases.append("setup")
+                        if params["path"] == f"{guest_root}/setup.txt":
+                            phases.append("setup")
+                    elif method == "write_text":
+                        files[params["path"]] = params["content"].encode()
                     elif method == "get_file_size":
                         result["size"] = len(files[params["path"]])
                     elif method == "read_bytes":
                         result["content_b64"] = base64.b64encode(files[params["path"]]).decode()
-                        phases.append("grade")
+                        if params["path"] == reference:
+                            phases.append("grade")
                     else:
                         result = {"success": False, "error": "Unsupported fixture command"}
                     body = ("data: " + json.dumps(result) + "\n\n").encode()
@@ -114,10 +161,10 @@ async def evaluate(task, session):
             transport.list_files = AsyncMock(return_value=[])
 
             async def execute(*args, **kwargs):
-                self.assertEqual(files["C:/fixture/setup.txt"], b"ready")
+                self.assertEqual(files[f"{guest_root}/setup.txt"], b"ready")
                 self.assertNotIn("reference", phases)
                 phases.append("agent")
-                files["C:/fixture/answer.txt"] = b"0.4"
+                files[f"{guest_root}/answer.txt"] = b"0.4"
                 return {"return_code": 0, "stdout": "", "stderr": ""}
             transport.execute = AsyncMock(side_effect=execute)
 
@@ -136,24 +183,61 @@ async def evaluate(task, session):
                 "task": {"path": str(task)},
                 "environment": {"import_path": "ale_adapter.environment:ALEEnvironment", "kwargs": {
                     "source": str(source), "native_python": PYTHON, "image_map": str(mapping)}},
-                "agent": {"import_path": "kubevirt_windows.agent:WindowsCommandAgent", "model_name": "fake-model",
-                          "kwargs": {"command": "C:\\Agent\\run.cmd"}},
+                "agent": {"import_path": "Agents.AgentsLastExam.agent:ALECommandAgent", "model_name": "fake-model",
+                          "kwargs": {"command": "C:\\Agent\\run.cmd", "linux_command": "/opt/agent/run.sh"}},
                 "verifier": {"import_path": "ale_adapter.verifier:ALEVerifier"},
             })
-            with patch("kubevirt_windows.environment.Settings.from_env", return_value=settings), \
+            original_spawn = asyncio.create_subprocess_exec
+            async def spawn(*args, **kwargs):
+                if "ale_adapter.linux_worker" in args:
+                    # Mock only VM provisioning in the separate native interpreter.
+                    # Guest I/O, task setup/grading, the agent and Harbor remain real.
+                    code = f'''
+import sys
+sys.path.insert(0, {str(source)!r})
+from ale_run.environments.providers.qemu import QemuProvider
+from ale_run.base_interface import SandboxHandle
+from ale_run.environments.images import get
+async def acquire(self, spec):
+    assert spec.os == "linux" and spec.vcpus == 4 and spec.memory_gb == 16
+    return SandboxHandle(id="fixture", endpoint={endpoint!r}, os="linux", **get("ale-ubuntu22").sandbox_paths())
+async def release(self, sandbox, mode="delete"):
+    assert mode == "delete"
+    await sandbox.run_command("fixture-release")
+QemuProvider.acquire = acquire
+QemuProvider.release = release
+from ale_adapter.linux_worker import main
+sys.argv = ["linux_worker", {str(root / "trials/ale-native-fixture/ale-worker.json")!r}]
+main()
+'''
+                    return await original_spawn(args[0], "-c", code, **kwargs)
+                return await original_spawn(*args, **kwargs)
+
+            with patch("kubevirt_windows.environment.Settings.from_env", return_value=settings if windows else None) as cluster, \
+                    patch("ale_adapter.environment.asyncio.create_subprocess_exec", side_effect=spawn), \
                     patch.object(KubeVirtWindowsEnvironment, "start", start), \
                     patch.object(KubeVirtWindowsEnvironment, "stop", stop), \
                     patch.dict(os.environ, {"ALE_REFERENCE_ARCHIVE_PASSWORD": "fake-reference-password"}):
                 result = await (await Trial.create(config)).run()
+            if not windows:
+                cluster.assert_not_called()
             trial = root / "trials/ale-native-fixture"
+            if fail_setup or cancel_setup:
+                self.assertIsNotNone(result.exception_info)
+                self.assertIsNone(result.verifier_result)
+                self.assertEqual(phases, ["setup", "cleanup"] if cancel_setup else ["cleanup"])
+                self.assertTrue((trial / "ale-sandbox.json").is_file())
+                return
             if result.exception_info:
                 logs = "\n".join(p.read_text() for p in trial.glob("ale-*.log"))
                 self.fail(f"{result.exception_info}\n{logs}")
             self.assertEqual(result.verifier_result.rewards, {"reward": .4})
             self.assertEqual(json.loads((trial / "verifier/native-result.json").read_text())["raw_scores"], [.4, .9])
             self.assertTrue((trial / "result.json").is_file())
-            self.assertEqual(phases[:3], ["resolution", "setup", "agent"])
+            self.assertEqual(phases[:3] if windows else phases[:2], ["resolution", "setup", "agent"] if windows else ["setup", "agent"])
             self.assertLess(phases.index("agent"), phases.index("reference"))
             self.assertLess(phases.index("reference"), phases.index("grade"))
             self.assertEqual(phases[-1], "cleanup")
+            if not windows:
+                self.assertEqual((trial / "agent/stdout.txt").read_text(), "agent executed")
             shutil.rmtree(source)

@@ -25,7 +25,7 @@ def score(result):
 class ALEVerifier(BaseVerifier):
     async def verify(self):
         if not isinstance(self.environment, ALEEnvironment):
-            raise TypeError("ALEVerifier requires the ALE agent's Windows VM")
+            raise TypeError("ALEVerifier requires the agent's ALE environment")
         result = await self.environment.native_phase(
             "evaluate", verifier_env={**(self.verifier_env or {}), **self.override_env},
         )

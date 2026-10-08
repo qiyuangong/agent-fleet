@@ -1,4 +1,4 @@
-"""Pass a prepared ALE Windows dataset to Harbor's native job CLI."""
+"""Pass a prepared ALE CPU dataset to Harbor's native job CLI."""
 
 import argparse
 import json
@@ -33,14 +33,14 @@ def main():
     parser.add_argument("--source", type=Path, required=True)
     parser.add_argument("--native-python", type=Path, required=True)
     parser.add_argument("--image-map", type=Path, required=True)
-    parser.add_argument("--agent", default="kubevirt_windows.agent:WindowsCommandAgent")
+    parser.add_argument("--agent", default="Agents.AgentsLastExam.agent:ALECommandAgent")
     parser.add_argument("--task-data-source", default="baked_in_sandbox")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("harbor_args", nargs=argparse.REMAINDER)
     args = parser.parse_args()
     source = validate_source(args.source)
     provenance = json.loads((args.dataset / "dataset.json").read_text())
-    if provenance["revision"] != REVISION or provenance["source_sha256"] != source_digest(source):
+    if provenance.get("scope") != "cpu" or provenance["revision"] != REVISION or provenance["source_sha256"] != source_digest(source):
         parser.error("ALE dataset differs from the prepared native source")
     if not args.native_python.is_file():
         parser.error("Run ALE setup before launch")
@@ -56,7 +56,9 @@ def main():
     cmd = command(args)
     if args.dry_run:
         # Native CLI arguments can contain credentials. Do not print them.
-        print(json.dumps({"benchmark": "ale-windows", "tasks": len(definitions), "revision": REVISION}))
+        counts = {os_type: sum(json.loads(path.read_text())["os"] == os_type for path in definitions)
+                  for os_type in ("linux", "windows")}
+        print(json.dumps({"benchmark": "ale-cpu", "tasks": len(definitions), "os": counts, "revision": REVISION}))
         return
     os.execvpe(cmd[0], cmd, os.environ)
 

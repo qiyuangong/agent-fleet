@@ -65,6 +65,16 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(cmd[-2:], ["--max-retries", "2"])
         self.assertEqual(cmd.count("--include-task-name"), 2)
 
+    def test_windows_backend_handoff_and_environment_default(self):
+        with patch.dict(os.environ, {"HARBOR_ALE_WINDOWS_BACKEND": "docker"}):
+            args = self.arguments("--all")
+        self.assertEqual(args.windows_backend, "docker")
+        self.assertIn("windows_backend=docker", command(args))
+        self.assertEqual(self.arguments("--backend", "docker").windows_backend, "docker")
+        self.assertEqual(self.arguments("--windows-backend", "kubevirt").windows_backend, "kubevirt")
+        image, _ = self.launch(["--all", "--windows-backend", "docker"])
+        self.assertEqual(image.call_args.args[2], "docker")
+
     def launch(self, args, *, prepared=False):
         marker = {"source": str(self.root), "dataset": str(self.dataset), "native_python": sys.executable}
         argv = ["launch", "--cache", str(self.root), "--image-map", str(self.images)] if prepared else ["launch"] + [

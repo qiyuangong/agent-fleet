@@ -8,7 +8,7 @@
 | `ale_adapter/source.py` | Revision, source integrity and image-map checks |
 | `ale_adapter/adapter.py` | Native Linux/Windows CPU variant discovery and conversion; exclude GPU before imports |
 | `ale_adapter/launch.py` | WAA-style selection/workers/output options, prepared dataset validation and Harbor CLI handoff |
-| `ale_adapter/environment.py` | Harbor guest I/O, Windows PVC delegation and native worker ownership |
+| `ale_adapter/environment.py` | Harbor guest I/O, Windows KubeVirt/Dockur delegation and native worker ownership |
 | `ale_adapter/linux.py` | Existing SBX/Docker backend selection and container definition |
 | `ale_adapter/cua_proxy.py`, `guest_http.py` | Native CUA HTTP connection through existing backend command/file APIs |
 | `ale_adapter/native.py` | Unchanged ALE driver/session, staging and setup/evaluation |

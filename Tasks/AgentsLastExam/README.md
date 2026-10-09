@@ -102,7 +102,10 @@ contains no ALE software/data. A standalone qcow2 needs to be imported and
 boot-validated in Dockur before becoming golden storage; follow
 [Dockur's storage instructions](https://github.com/dockur/windows). Disks must
 have no backing files; symlinks and storage mounted writable by a running
-container are rejected. Stop the guest cleanly before copying golden storage.
+container are rejected. Before freezing an imported UEFI guest, register/preserve Windows Boot Manager
+(`bcdboot C:\Windows /p` from an elevated guest shell), then shut Windows down
+cleanly. The pinned runtime checks this firmware entry; a disk-only import can
+hit its boot timeout even while Windows starts.
 
 Add `docker_storage` to each Windows image-map profile (shown below). A Docker
 run requires this field; a KubeVirt run requires `pvc`. Both may coexist in one
@@ -260,3 +263,9 @@ ALE_TEST_SOURCE=/path/to/pinned/ale ALE_TEST_PYTHON=/path/to/native-env/bin/pyth
 Portable and loopback tests do not establish live benchmark parity. A complete
 run needs a prepared ALE SBX template or Docker image, Windows CPU/licensed images, native task
 data, judge credentials and agent entrypoints. These are operator-provided assets.
+
+Docker validation booted an independent copy of the local ALE Windows disk with
+prepared UEFI state on the pinned public Dockur runtime, using normal startup
+settings. Command exit codes, binary transfer, log recovery after stop, and
+container/storage deletion passed. This checks the Windows runtime and ALE CUA
+transport; it does not establish full benchmark scores or licensed-image parity.

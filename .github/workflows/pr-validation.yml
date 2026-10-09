@@ -25,21 +25,25 @@ jobs:
         with:
           python-version: "3.12"
       - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: Tasks/AgentsLastExam/pyproject.toml
       - name: Prepare native driver and run the Harbor trial regression
         env:
           PYTHONPATH: Tasks/AgentsLastExam:Agents/utils/common/Harbor:.
           PYTHONDONTWRITEBYTECODE: "1"
           ALE_TEST_SOURCE: /tmp/ale-source
           ALE_TEST_PYTHON: /tmp/ale-native/bin/python
+          UV_PROJECT_ENVIRONMENT: /tmp/ale-host
         run: |
           set -euo pipefail
-          uv pip install --system -r Agents/utils/common/Harbor/runner-requirements.txt
+          uv sync --python 3.12 --project Tasks/AgentsLastExam
           uv venv --python 3.12 /tmp/ale-native
           uv pip install --python "$ALE_TEST_PYTHON" cua-bench==0.2.7 pydantic requests
           git init "$ALE_TEST_SOURCE"
           git -C "$ALE_TEST_SOURCE" fetch --depth 1 https://github.com/rdi-berkeley/agents-last-exam.git d9abc0734b56ea34116c5bfcbdd0b808269ab9e2
           git -C "$ALE_TEST_SOURCE" checkout --detach FETCH_HEAD
-          python -m unittest discover -s Tasks/AgentsLastExam/tests -v
+          /tmp/ale-host/bin/python -m unittest discover -s Tasks/AgentsLastExam/tests -v
 
   portable-checks:
     name: Portable tests

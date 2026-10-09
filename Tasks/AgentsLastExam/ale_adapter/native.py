@@ -12,6 +12,28 @@ from urllib.parse import urlparse
 from .source import REVISION, source_digest, validate_source
 
 
+async def set_windows_resolution(sandbox, resolution):
+    """Preserve ALE's display requirement; opt-in diagnostics record deviations."""
+    import base64
+
+    from ale_run.environments.providers.gcloud import _SET_RES_PY
+
+    width, height = resolution
+    encoded = base64.b64encode(_SET_RES_PY.encode()).decode()
+    result = await sandbox.run_command(
+        f'"{sandbox.python}" -c "import base64,sys;sys.argv=[\'display\',\'{width}\',\'{height}\'];'
+        f'exec(base64.b64decode(\'{encoded}\'))"', timeout=60,
+    )
+    applied = result.returncode == 0 and "set_ok" in result.stdout
+    if not applied:
+        if os.environ.get("ALE_WINDOWS_RESOLUTION_STRICT") != "0":
+            raise RuntimeError("ALE desktop resolution setup failed")
+        print(f"[ale] WARN: ALE desktop resolution {width}x{height} not applied; "
+              "explicit diagnostic mode continues at the guest's current mode",
+              file=sys.stderr, flush=True)
+    return {"requested": list(resolution), "applied": applied}
+
+
 async def run(spec, phase, sandbox=None):
     source = validate_source(spec["source"])
     if spec["revision"] != REVISION or source_digest(source) != spec["source_sha256"]:
@@ -38,19 +60,9 @@ async def run(spec, phase, sandbox=None):
     backend = select(spec["task_data_source"])
     try:
         if phase == "setup":
+            setup = {"setup": "complete"}
             if spec["os"] == "windows" and spec.get("resolution"):
-                # Reuse ALE's Windows API implementation and reject unsupported modes.
-                import base64
-
-                from ale_run.environments.providers.gcloud import _SET_RES_PY
-                width, height = spec["resolution"]
-                encoded = base64.b64encode(_SET_RES_PY.encode()).decode()
-                result = await sandbox.run_command(
-                    f'"{sandbox.python}" -c "import base64,sys;sys.argv=[\'display\',\'{width}\',\'{height}\'];'
-                    f'exec(base64.b64decode(\'{encoded}\'))"', timeout=60,
-                )
-                if result.returncode or "set_ok" not in result.stdout:
-                    raise RuntimeError("ALE desktop resolution setup failed")
+                setup["resolution"] = await set_windows_resolution(sandbox, spec["resolution"])
             if data.reference_dir:
                 # Golden images must have encrypted references only. Remove any
                 # stale plaintext reference for this variant before agent setup.
@@ -58,7 +70,7 @@ async def run(spec, phase, sandbox=None):
             if data.requires_task_data:
                 await backend.stage_input(sandbox, data, source=spec["task_data_source"])
             await driver.setup()
-            return {"setup": "complete"}
+            return setup
         if not callable(driver._task_loader.get_evaluate_fn()):
             raise TypeError("Missing native ALE evaluator")
         if data.requires_task_data:

@@ -17,19 +17,21 @@ are errors. Generated shell/batch verifiers fail if the custom verifier is omitt
 
 ## Prepare
 
-Run repository setup for the pinned Harbor runner. ALE dependencies live in a
-separate Python environment so they cannot change Harbor's pins:
+Use the same setup/run workflow as WAA and WAA-V2. Setup prepares a Python 3.12
+Harbor environment with `uv sync`, the pinned native ALE source and dependencies,
+and all CPU Harbor task variants:
 
 ```bash
-./scripts/setup.sh
-./Tasks/AgentsLastExam/setup.sh \
-  --source "$HOME/.cache/agent-fleet/ale/source" \
-  --env-dir "$HOME/.cache/agent-fleet/ale/native-env"
-PYTHONPATH=Tasks/AgentsLastExam PYTHONDONTWRITEBYTECODE=1 \
-  "$HOME/.cache/agent-fleet/ale/native-env/bin/python" -m ale_adapter.adapter \
-  --source "$HOME/.cache/agent-fleet/ale/source" \
-  --output-dir "$HOME/.cache/agent-fleet/ale/tasks"
+./Tasks/AgentsLastExam/setup.sh
 ```
+
+`HARBOR_ALE_CACHE_DIR` defaults to `$HOME/.cache/agent-fleet/ale`, and
+`HARBOR_ALE_ENV_DIR` defaults to `$HARBOR_ALE_CACHE_DIR/venv`. Native dependencies
+stay in `$HARBOR_ALE_CACHE_DIR/native-env` so they cannot change Harbor's pins.
+Setup reuses a matching dataset and records the generated local `uv.lock` hash
+and installed package versions. Startup validates these and never installs packages.
+Use `--source`, `--env-dir` (or `--native-env-dir`) and `--dataset` during setup
+to reuse existing prepared locations. The lockfile is generated and git-ignored.
 
 Setup installs upstream framework and evaluation dependencies, including large
 packages such as PyTorch with CPU host wheels. The source revision and native
@@ -79,6 +81,10 @@ reported as trial errors.
 For Windows, import the official ALE CPU images as golden PVCs following the
 [Windows backend guide](../../Agents/utils/common/Harbor/KUBEVIRT_WINDOWS_README.md).
 Preserve `E:\agenthle`, task applications/licenses, Python and CUA startup.
+Alternatively, use KubeVirt's native copy-on-write layer over each task's mapped
+read-only golden PVC (`HARBOR_KUBEVIRT_DISK_MODE=overlay`) to avoid per-trial
+cloning; see the backend guide. Retained overlay trials stay running because a
+platform-level VM stop discards the layer. Free/licensed PVC mappings still apply.
 
 Create an operator-owned image map, for example `/data/ale-images.json`:
 
@@ -98,6 +104,12 @@ Create an operator-owned image map, for example `/data/ale-images.json`:
 Each snapshot must match the native task's software and licensing requirements.
 CPU, memory, task timeout and Windows desktop resolution follow native task
 metadata. GPU tasks and GPU resource overrides are rejected.
+
+Windows setup fails if the guest cannot apply the profile's requested resolution.
+Prepare an image/display driver supporting that mode before benchmark runs.
+`ALE_WINDOWS_RESOLUTION_STRICT=0` explicitly allows diagnostic runs at the guest's
+current mode; the warning and `ale-setup.json` record that the requested resolution
+was not applied. Results from this override do not establish benchmark parity.
 
 Golden images must contain encrypted `reference.7z` archives only, with no
 plaintext references for **any** variant. Keep judge credentials on the host.
@@ -125,21 +137,19 @@ export HARBOR_ALE_LINUX_AGENT_COMMAND='/opt/agent/run-agent.sh'
 export HARBOR_KUBEVIRT_IMAGE=ale-cpu-free
 export HARBOR_WINDOWS_AGENT_COMMAND='C:\Agent\run-agent.cmd'
 export ALE_REFERENCE_ARCHIVE_PASSWORD='your-private-reference-password'
-./Tasks/AgentsLastExam/run.sh \
-  --dataset "$HOME/.cache/agent-fleet/ale/tasks" \
-  --source "$HOME/.cache/agent-fleet/ale/source" \
-  --native-python "$HOME/.cache/agent-fleet/ale/native-env/bin/python" \
-  --image-map /data/ale-images.json --dry-run
-# Remove --dry-run to execute; forward ordinary Harbor options after --:
-./Tasks/AgentsLastExam/run.sh \
-  --dataset "$HOME/.cache/agent-fleet/ale/tasks" \
-  --source "$HOME/.cache/agent-fleet/ale/source" \
-  --native-python "$HOME/.cache/agent-fleet/ale/native-env/bin/python" \
-  --image-map /data/ale-images.json -- \
-  --model your-model --n-concurrent 2 --jobs-dir ./runs --job-name ale-cpu
+export HARBOR_ALE_IMAGE_MAP=/data/ale-images.json
+./Tasks/AgentsLastExam/run.sh --all --dry-run
+./Tasks/AgentsLastExam/run.sh --all --workers 2 --model your-model --output ./runs/ale-cpu
+# The unified launcher, FleetSpec and prompt mode use the same benchmark runner:
+./scripts/run_fleet.sh --taskset ale --workers 2
+# Subsets and ordinary Harbor options:
+./Tasks/AgentsLastExam/run.sh --domain visual_media --workers 2
+./Tasks/AgentsLastExam/run.sh --task computing_math/tris_crackme -- --max-retries 2
+./Tasks/AgentsLastExam/run.sh --all --os linux --dry-run
 ```
 
-Use `--agent module:Class` before `--` for a custom Harbor agent. Mixed runs need
+The default agent alias is `ale-command`. Use `--agent module:Class` before `--`
+for a custom Harbor agent. Mixed runs need
 an agent supporting both OSes; Linux-only agents can run with Windows tasks
 filtered out. Configure kubeconfig, namespace, guest ports, nodes and clone
 storage through shared `HARBOR_KUBEVIRT_*` settings. Each Windows trial replaces
@@ -148,15 +158,24 @@ cluster settings. Runtime overrides, including empty values, follow the shared
 configuration loader. `OPIK_URL` selects the prepared `opik harbor` runner;
 empty selects ordinary Harbor.
 
-Harbor's `--include-task-name` / `--exclude-task-name` select subsets. Names are
-`<domain>--<task>--v<variant-index>`; full CPU runs omit filters. Dry-run validates
-all image mappings and provenance, prints counts by OS, and starts no guests.
+Select `--all`, `--domain DOMAIN`, or `--task DOMAIN/TASK` (comma-separated task
+names are supported). A native task selects all its variants; use
+`<domain>--<task>--v<variant-index>` to select one variant. Add `--os linux|windows`
+to restrict the OS. Unknown or filtered task names fail before launching Harbor.
+Dry-run validates full dataset provenance and selected image mappings, prints
+counts by OS and selected names, and starts no guests.
+The existing explicit `--dataset`, `--source`, `--native-python`, `--image-map`
+options and forwarded Harbor `--include-task-name` / `--exclude-task-name` remain
+available. FleetSpec/prompt mode support `ale`, `ale-command` and custom Harbor
+agents; unified `--output` saves a FleetSpec, while the benchmark runner's
+`--output` chooses the Harbor job directory. Both runners stay in the foreground.
 Forwarded CLI options can contain credentials and are never printed.
 
 Results use normal Harbor job/trial artifacts plus `verifier/native-result.json`.
 Both OSes write `ale-setup.log` and `ale-evaluate.log`; `ale-linux.json` records
-the selected Linux backend. Resume with native `harbor jobs resume
---job-path ./runs/ale-cpu` and the same configuration and
+the selected Linux backend. Resume with
+`$HARBOR_ALE_ENV_DIR/bin/harbor jobs resume --job-path ./runs/ale-cpu`
+(default environment: `$HOME/.cache/agent-fleet/ale/venv`) and the same configuration and
 `PYTHONPATH=.:Tasks/AgentsLastExam:Agents/utils/common/Harbor`.
 Cancellation stops native phases before guest cleanup. Hard termination may
 leave resources: inspect `kubevirt.json` for Windows and `ale-linux.json` for

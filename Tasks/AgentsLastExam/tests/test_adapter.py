@@ -7,6 +7,7 @@ import os
 import sys
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
@@ -20,7 +21,12 @@ from ale_adapter.verifier import ALEVerifier, score
 from harbor.models.task.config import EnvironmentConfig
 from harbor.models.task.task import Task
 from harbor.models.trial.paths import TrialPaths
-from kubevirt_windows.control import Cluster, Settings
+from kubevirt_windows.control import (
+    DISK_MODE_OVERLAY,
+    Cluster,
+    Settings,
+    build_create_request,
+)
 from kubevirt_windows.environment import KubeVirtWindowsEnvironment
 
 
@@ -202,14 +208,17 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
             patcher.start()
             self.addCleanup(patcher.stop)
 
-    def environment(self, gpu=False, **kwargs):
+    def environment(self, gpu=False, snapshot=None, **kwargs):
         native = record(gpu)
+        if snapshot:
+            native["snapshot"] = snapshot
         directory = self.root / ("gpu" if gpu else "cpu")
         directory.mkdir(exist_ok=True)
         (directory / "ale.json").write_text(json.dumps(native))
         image_map = self.root / "images.json"
         image_map.write_text(json.dumps({
             "cpu-free": {"pvc": "cpu-pvc", "image_family": "ale-win10"},
+            "cpu-license": {"pvc": "licensed-pvc", "image_family": "ale-win10"},
             "gpu-free": {"pvc": "gpu-pvc", "image_family": "ale-win10", "gpu_device": "nvidia.com/test-gpu"},
         }))
         return ALEEnvironment(
@@ -337,6 +346,17 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.settings.image, "default-pvc")
         with self.assertRaises(ValueError):
             self.environment(True)
+
+    def test_overlay_preserves_free_and_licensed_snapshot_selection(self):
+        with patch("kubevirt_windows.control.Settings.from_env", return_value=replace(
+                self.settings, disk_mode=DISK_MODE_OVERLAY)):
+            for snapshot, expected in (("cpu-free", "cpu-pvc"), ("cpu-license", "licensed-pvc")):
+                with self.subTest(snapshot=snapshot):
+                    environment = self.environment(snapshot=snapshot)
+                    request = build_create_request(environment.backend.control.settings, "trial-ale")
+                    self.assertEqual(request["spec"]["template"]["spec"]["volumes"][0][
+                        "ephemeral"]["persistentVolumeClaim"], {"claimName": expected, "readOnly": True})
+        self.assertEqual(self.settings.image, "default-pvc")
 
     def test_rejects_unimplemented_data_backend(self):
         with self.assertRaisesRegex(ValueError, "staging"):

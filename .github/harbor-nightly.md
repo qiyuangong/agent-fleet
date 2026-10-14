@@ -123,6 +123,17 @@ On 2026-10-13 one sample had 16 exit-126 errors and four startup timeouts; the
 next sample had 20 exit-126 errors. The entrypoint fix addresses exit 126.
 Investigate image pulls or startup timing separately if timeouts recur.
 
+## Hugging Face download routing
+
+Set `HF_ENDPOINT=https://hf-mirror.com` in the native runner environment or
+the checkout's ignored `config.local.env` to select that mirror. The shared
+launcher forwards a configured endpoint to both agent and verifier execution,
+including Oracle runs. An unset or empty setting adds no endpoint override.
+Set it before starting the benchmark because Hugging Face libraries read
+environment settings when imported. Literal `huggingface.co` URLs in task
+scripts keep their original routing; changing the endpoint does not preload
+model files or address unrelated PyTorch/CUDA package downloads.
+
 ## Docker registry failures
 
 A reachable registry endpoint does not prove that all task images are

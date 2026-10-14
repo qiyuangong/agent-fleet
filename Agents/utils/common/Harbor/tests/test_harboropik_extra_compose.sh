@@ -345,6 +345,7 @@ run_harboropik() {
     BASE_URL="http://llm.example" \
     API_KEY="fake-llm-key" \
     MODEL="fake-model" \
+    HF_ENDPOINT="https://hf-mirror.example" \
     MIN_TEST="$min_test" \
     MIN_TEST_INCLUDE_TASK="fix-git" \
     HARBOR_CC_OPIK_ENABLE_HOOK="$hook_flag" \
@@ -413,7 +414,7 @@ main() {
   local tmp fake_bin default_overlay claude_capture opencode_capture pi_capture capture_bin
   local seta_capture sweverify_capture registry_capture traceoff_capture traceoff_oc_capture
   local opencode_registry_capture opencode_local_capture
-  local min_test_capture
+  local min_test_capture oracle_capture
   tmp="$(mktemp -d)"
   TEST_TMP_DIR="$tmp"
   trap 'rm -rf "$TEST_TMP_DIR"' EXIT
@@ -433,6 +434,8 @@ main() {
   assert_arg_pair "$claude_capture" "harbor" "run"
   assert_arg_pair "$claude_capture" "--dataset" "codepde@1.0"
   assert_arg_pair "$claude_capture" "--ae" "HARBOR_DATASET=codepde@1.0"
+  assert_arg_pair "$claude_capture" "--ae" "HF_ENDPOINT=https://hf-mirror.example"
+  assert_arg_pair "$claude_capture" "--ve" "HF_ENDPOINT=https://hf-mirror.example"
   assert_file_content \
     "${claude_capture}.verifier-tools" \
     "curl,env,uv,uvx"
@@ -464,6 +467,8 @@ main() {
     "--ae" \
     "HARBOR_DATASET=terminal-bench/terminal-bench-2-1"
   assert_arg_pair "$opencode_capture" "-i" "terminal-bench/fix-git"
+  assert_arg_pair "$opencode_capture" "--ae" "HF_ENDPOINT=https://hf-mirror.example"
+  assert_arg_pair "$opencode_capture" "--ve" "HF_ENDPOINT=https://hf-mirror.example"
   assert_arg_absent "$opencode_capture" "fake-llm-key"
   assert_arg_absent "$opencode_capture" "OPENCODE_RUNTIME_SECRETS_JSON"
   assert_structured_mount_arg \
@@ -493,6 +498,8 @@ main() {
   assert_exact_arg_absent "$pi_capture" "thinking=high"
   assert_arg_pair "$pi_capture" "--ae" "AGENT_FLEET_API_KEY=fake-llm-key"
   assert_arg_pair "$pi_capture" "--ae" "PI_OFFLINE=1"
+  assert_arg_pair "$pi_capture" "--ae" "HF_ENDPOINT=https://hf-mirror.example"
+  assert_arg_pair "$pi_capture" "--ve" "HF_ENDPOINT=https://hf-mirror.example"
   assert_arg_pair \
     "$pi_capture" \
     "--ae" \
@@ -512,6 +519,14 @@ main() {
     "$pi_capture" \
     "$tmp/pi-default/wheels" \
     "/opt/tb-opik/python-wheels"
+
+  oracle_capture="$tmp/oracle-default.args"
+  run_harboropik \
+    "oracle" "$capture_bin" "$oracle_capture" "$tmp/oracle-default" \
+    "terminalbench21" "fix-git" "false"
+  assert_arg_pair "$oracle_capture" "-a" "oracle"
+  assert_arg_pair "$oracle_capture" "--ae" "HF_ENDPOINT=https://hf-mirror.example"
+  assert_arg_pair "$oracle_capture" "--ve" "HF_ENDPOINT=https://hf-mirror.example"
 
   opencode_registry_capture="$tmp/opencode-registry.args"
   run_harboropik \

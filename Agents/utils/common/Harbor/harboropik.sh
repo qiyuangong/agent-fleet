@@ -245,7 +245,14 @@ append_rust_package_mirror_env() {
   fi
 }
 
+append_huggingface_environment_args() {
+  if [[ -n "${HF_ENDPOINT:-}" ]]; then
+    cmd+=( --ae "HF_ENDPOINT=$HF_ENDPOINT" --ve "HF_ENDPOINT=$HF_ENDPOINT" )
+  fi
+}
+
 append_package_environment_args() {
+  append_huggingface_environment_args
   local env_name
   for env_name in \
     PIP_INDEX_URL \
@@ -1114,6 +1121,7 @@ run_oracle_task() {
   if [[ -n "${UV_PYTHON_PREFERENCE:-}" ]]; then
     cmd+=( --ve "UV_PYTHON_PREFERENCE=$UV_PYTHON_PREFERENCE" )
   fi
+  append_huggingface_environment_args
   if [[ -n "$HARBOR_LIMIT" ]]; then
     cmd+=( -l "$HARBOR_LIMIT" )
   fi

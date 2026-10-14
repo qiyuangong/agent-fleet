@@ -51,6 +51,7 @@ class HarborPackageEnvironmentTest(unittest.TestCase):
             for name in (
                 "cargo_registry_env_suffix",
                 "append_rust_package_mirror_env",
+                "append_huggingface_environment_args",
                 "append_package_environment_args",
             )
         )
@@ -77,6 +78,7 @@ class HarborPackageEnvironmentTest(unittest.TestCase):
             "GO111MODULE": "on",
             "GOPROXY": "https://go.example",
             "GOSUMDB": "off",
+            "HF_ENDPOINT": "https://hf-mirror.example",
         }
         result = subprocess.run(
             ["bash", "-c", command],
@@ -100,6 +102,24 @@ class HarborPackageEnvironmentTest(unittest.TestCase):
                     ["--ve", expected],
                     [arguments[index : index + 2] for index in range(len(arguments) - 1)],
                 )
+
+    def test_empty_or_unset_huggingface_endpoint_adds_no_override(self) -> None:
+        helper = function_source(HARBOROPIK.read_text(), "append_huggingface_environment_args")
+        command = (
+            f"{helper}\ncmd=()\nappend_huggingface_environment_args\n"
+            'printf "%s" "${cmd[*]}"\n'
+        )
+        for setting in ({}, {"HF_ENDPOINT": ""}):
+            with self.subTest(setting=setting):
+                result = subprocess.run(
+                    ["bash", "-euo", "pipefail", "-c", command],
+                    env={"PATH": "/usr/bin:/bin", **setting},
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout, "")
 
 
 if __name__ == "__main__":

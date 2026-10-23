@@ -179,6 +179,15 @@ class TokenPreservationTests(unittest.TestCase):
 
 
 class ResolveConfigTests(unittest.TestCase):
+    def test_missing_credentials_point_to_private_config(self):
+        cfg = setup.resolve_config({"HOME": "/h"}, [])
+
+        with self.assertRaises(setup._ParserError) as error:
+            setup.validate_required(cfg)
+
+        self.assertIn("/config.local.env", str(error.exception))
+        self.assertNotIn("/config.env ", str(error.exception))
+
     def test_default_sandbox_mode_is_off(self):
         env = {"BASE_URL": "u", "API_KEY": "k", "HOME": "/h"}
         cfg = setup.resolve_config(env, [])

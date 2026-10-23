@@ -19,9 +19,6 @@ import yaml
 OPENCLAW_DIR = Path(__file__).resolve().parents[1]
 SETUP_PY = OPENCLAW_DIR / "scripts" / "setup.py"
 TEMPLATE_PATH = OPENCLAW_DIR / "config" / "openclaw.json.template"
-ANSIBLE_FLEET_TEMPLATE_PATH = (
-    OPENCLAW_DIR / "config" / "ansible" / "templates" / "fleet.env.j2"
-)
 
 
 def _load_setup_module():
@@ -33,18 +30,6 @@ def _load_setup_module():
 
 
 setup = _load_setup_module()
-
-
-class AnsibleFleetTemplateTests(unittest.TestCase):
-    def test_opik_block_is_gated_on_the_url_alone(self):
-        template = ANSIBLE_FLEET_TEMPLATE_PATH.read_text(encoding="utf-8")
-
-        # OPIK_URL is the single switch, so no retired switch may be rendered
-        # and the credential block must depend on the URL being set.
-        for retired in ("TRACE_TO_OPIK", "OPIK_PLUGIN", "OPIK_MODE"):
-            self.assertNotIn(f"{retired}=", template)
-        self.assertIn("{% if opik_url is defined and opik_url %}", template)
-        self.assertIn("OPIK_URL={{ opik_url }}", template)
 
 
 def _base_cfg(**overrides):

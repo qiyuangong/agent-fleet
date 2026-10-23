@@ -1,6 +1,6 @@
 # OpenClaw Guide
 
-Operator-facing reference: configuration, fleet commands, multi-node deployment, and platform notes. See [SECURITY.md](./SECURITY.md) for the security policy matrix.
+Operator-facing reference: configuration, fleet commands, and platform notes. See [SECURITY.md](./SECURITY.md) for the security policy matrix.
 
 ## Configuration
 
@@ -213,26 +213,7 @@ Optional environment variables:
 | `OPENCLAW_SESSION_POLL_INTERVAL` | `2` | Seconds between pane refreshes |
 | `ZELLIJ_BIN` | `zellij` | Zellij executable override |
 
-## Deployment
-
-### Multi-Node (Ansible)
-
-To deploy the fleet across multiple nodes, use the bundled Ansible playbook. It clones the repo on each node, renders `fleet.env` from a template, runs `setup.sh`, and starts the fleet.
-
-```bash
-# Edit inventory.ini with your node IPs first
-ansible-playbook -i Agents/Openclaw/config/ansible/inventory.ini \
-  Agents/Openclaw/config/ansible/deploy.yml \
-  -e base_url="https://api.example.com/v1" \
-  -e api_key="sk-xxx" \
-  -e model="nex/nex-n1.1" \
-  -e opik_url="" \
-  -e openclaw_image="registry.example.com/openclaw:latest"
-```
-
-The playbook renders `Agents/Openclaw/config/ansible/templates/fleet.env.j2` into `Agents/Openclaw/config/fleet.env` on each node, then runs `setup.sh` and `docker compose up -d`.
-To enable tracing, set `opik_url` and `opik_project_name`, and use an image
-built with the Opik layer. An empty `opik_url` disables tracing.
+## Platform Notes
 
 ### Linux Notes
 
@@ -259,16 +240,12 @@ agent-fleet/
 │       │   ├── build-openclaw-image.sh     # Build openclaw:local (or openclaw:local-opik)
 │       │   └── openclaw-fleet.sh           # Fleet management tool
 │       ├── config/
-│       │   ├── ansible/
-│       │   │   ├── deploy.yml              # Multi-node deployment playbook
-│       │   │   ├── inventory.ini           # Node inventory (edit with your IPs)
-│       │   │   └── templates/fleet.env.j2  # fleet.env template rendered per node
 │       │   ├── openclaw.json.template      # Base config template
 │       │   └── fleet.env                   # Local setup defaults
 │       ├── docker-compose.yml              # Auto-generated — do not edit manually
 │       ├── .env                            # Auto-generated tokens (TOKEN_1 … TOKEN_N)
 │       ├── README.md                       # Quick start + architecture
-│       ├── GUIDE.md                        # Configuration, fleet commands, deployment
+│       ├── GUIDE.md                        # Configuration, fleet commands, platform notes
 │       └── SECURITY.md                     # Policy matrix + known limitations
 └── README.md
 ```
